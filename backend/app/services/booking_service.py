@@ -1,13 +1,13 @@
-"""Transactional Booking Service with Concurrency Locking & Cryptographic QR Signing."""
+"""Transactional Booking Service with Concurrency Locking, Cancellation, Extension & Recommendations."""
 import hashlib
 import hmac
+import math
 import threading
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Dict
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List
 from fastapi import HTTPException, status
-from sqlalchemy import and_
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import (
@@ -21,7 +21,11 @@ from app.models import (
     SlotType,
     User,
 )
-from app.schemas import BookingCreateRequest
+from app.schemas import (
+    BookingCreateRequest,
+    DriverRecommendationRequest,
+    SlotRecommendationItem,
+)
 
 _in_memory_slot_locks: Dict[int, threading.Lock] = {}
 _global_lock = threading.Lock()
@@ -95,7 +99,6 @@ def create_transactional_booking(
                 detail=f"Slot {slot.slot_number} is currently under maintenance.",
             )
 
-        # Normalize datetimes for overlap comparison
         req_start = (
             payload.start_time.replace(tzinfo=timezone.utc)
             if payload.start_time.tzinfo is None
@@ -107,7 +110,6 @@ def create_transactional_booking(
             else payload.end_time.astimezone(timezone.utc)
         )
 
-        # Prevent double booking: check any active/confirmed/pending booking with overlapping window
         active_statuses = [
             BookingStatus.PENDING_PAYMENT,
             BookingStatus.CONFIRMED,
@@ -143,7 +145,6 @@ def create_transactional_booking(
                     ),
                 )
 
-        # Compute server-side pricing (never trust frontend amounts)
         duration_seconds = (req_end - req_start).total_seconds()
         duration_hours = max(1.0, round(duration_seconds / 3600.0, 2))
         hourly_rate = lot.base_hourly_rate_inr
@@ -154,7 +155,7 @@ def create_transactional_booking(
 
         surge = lot.current_surge_multiplier if lot.dynamic_pricing_enabled else 1.0
         base_amount = round(hourly_rate * duration_hours * surge, 2)
-        gst_amount = round(base_amount * 0.18, 2)  # 18% GST (India)
+        gst_amount = round(base_amount * 0.18, 2)
         total_amount = round(base_amount + gst_amount, 2)
 
         booking_ref = f"PW-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
@@ -194,9 +195,263 @@ def create_transactional_booking(
         )
         db.add(payment)
 
-        # Mark slot as reserved immediately inside the same atomic transaction
         slot.status = SlotStatus.RESERVED
 
         db.commit()
         db.refresh(booking)
         return booking
+
+
+def cancel_transactional_booking(
+    db: Session, booking_reference: str
+) -> Booking:
+    """Cancel an active/confirmed/pending reservation and release the parking slot."""
+    booking = (
+        db.query(Booking)
+        .filter(Booking.booking_reference == booking_reference)
+        .first()
+    )
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking reference not found.",
+        )
+
+    if booking.status in (BookingStatus.COMPLETED, BookingStatus.CANCELLED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot cancel booking in '{booking.status.value}' status.",
+        )
+
+    with acquire_slot_lock(booking.slot_id):
+        booking.status = BookingStatus.CANCELLED
+        if booking.payment:
+            booking.payment.status = PaymentStatus.REFUNDED
+
+        slot = (
+            db.query(ParkingSlot)
+            .filter(ParkingSlot.id == booking.slot_id)
+            .first()
+        )
+        if slot and slot.status in (SlotStatus.RESERVED, SlotStatus.OCCUPIED):
+            slot.status = SlotStatus.AVAILABLE
+
+        db.commit()
+        db.refresh(booking)
+        return booking
+
+
+def extend_transactional_booking(
+    db: Session, booking_reference: str, additional_hours: float
+) -> Booking:
+    """Extend a reservation after verifying zero overlap in the extended window."""
+    booking = (
+        db.query(Booking)
+        .filter(Booking.booking_reference == booking_reference)
+        .first()
+    )
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking reference not found.",
+        )
+
+    if booking.status not in (
+        BookingStatus.CONFIRMED,
+        BookingStatus.ACTIVE,
+        BookingStatus.PENDING_PAYMENT,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot extend booking in '{booking.status.value}' status.",
+        )
+
+    with acquire_slot_lock(booking.slot_id):
+        current_end = (
+            booking.end_time.replace(tzinfo=timezone.utc)
+            if booking.end_time.tzinfo is None
+            else booking.end_time.astimezone(timezone.utc)
+        )
+        new_end = current_end + timedelta(hours=additional_hours)
+
+        # Check if another booking overlaps the extension window
+        active_statuses = [
+            BookingStatus.PENDING_PAYMENT,
+            BookingStatus.CONFIRMED,
+            BookingStatus.ACTIVE,
+        ]
+        others = (
+            db.query(Booking)
+            .filter(
+                Booking.slot_id == booking.slot_id,
+                Booking.id != booking.id,
+                Booking.status.in_(active_statuses),
+            )
+            .all()
+        )
+        for other in others:
+            o_start = (
+                other.start_time.replace(tzinfo=timezone.utc)
+                if other.start_time.tzinfo is None
+                else other.start_time.astimezone(timezone.utc)
+            )
+            o_end = (
+                other.end_time.replace(tzinfo=timezone.utc)
+                if other.end_time.tzinfo is None
+                else other.end_time.astimezone(timezone.utc)
+            )
+            if current_end < o_end and new_end > o_start:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Extension conflict: Slot is reserved by {other.booking_reference} starting at {o_start.isoformat()}.",
+                )
+
+        lot = booking.lot
+        slot = booking.slot
+        hourly_rate = lot.base_hourly_rate_inr
+        if slot.slot_type == SlotType.EV_CHARGING:
+            hourly_rate += lot.ev_surcharge_inr
+        elif slot.slot_type == SlotType.SUV_XL:
+            hourly_rate += 25.0
+
+        new_duration = round(booking.duration_hours + additional_hours, 2)
+        new_base = round(hourly_rate * new_duration * booking.surge_multiplier, 2)
+        new_gst = round(new_base * 0.18, 2)
+        new_total = round(new_base + new_gst, 2)
+
+        booking.end_time = new_end
+        booking.duration_hours = new_duration
+        booking.base_amount_inr = new_base
+        booking.gst_amount_inr = new_gst
+        booking.total_amount_inr = new_total
+        if booking.payment:
+            booking.payment.amount_inr = new_total
+
+        db.commit()
+        db.refresh(booking)
+        return booking
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
+    )
+    return round(r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)), 2)
+
+
+def compute_driver_recommendations(
+    db: Session, req: DriverRecommendationRequest
+) -> List[SlotRecommendationItem]:
+    """Deterministic multi-factor slot recommendation engine."""
+    query = db.query(ParkingLot)
+    if req.city:
+        query = query.filter(ParkingLot.city.ilike(f"%{req.city}%"))
+    lots = query.all()
+
+    recommendations: List[SlotRecommendationItem] = []
+    for lot in lots:
+        dist_km = _haversine_km(
+            req.target_latitude,
+            req.target_longitude,
+            lot.latitude,
+            lot.longitude,
+        )
+        available_slots = [
+            s for s in lot.slots if s.status == SlotStatus.AVAILABLE
+        ]
+        if not available_slots:
+            continue
+
+        avail_ratio = len(available_slots) / max(1, len(lot.slots))
+
+        for slot in available_slots:
+            if req.requires_ev and slot.slot_type != SlotType.EV_CHARGING:
+                continue
+            if req.requires_accessible and slot.slot_type != SlotType.ACCESSIBLE:
+                continue
+            if (
+                req.vehicle_size == "SUV_XL"
+                and slot.slot_type not in (SlotType.SUV_XL, SlotType.ACCESSIBLE)
+            ):
+                continue
+
+            hourly = lot.base_hourly_rate_inr
+            if slot.slot_type == SlotType.EV_CHARGING:
+                hourly += lot.ev_surcharge_inr
+            elif slot.slot_type == SlotType.SUV_XL:
+                hourly += 25.0
+
+            surge = (
+                lot.current_surge_multiplier
+                if lot.dynamic_pricing_enabled
+                else 1.0
+            )
+            base_cost = hourly * req.duration_hours * surge
+            total_inr = round(base_cost * 1.18, 2)
+
+            # Deterministic Score (0 - 100)
+            dist_score = max(0.0, 30.0 - min(30.0, dist_km * 1.5))
+            size_score = (
+                20.0
+                if (
+                    req.vehicle_size == "SUV_XL"
+                    and slot.slot_type == SlotType.SUV_XL
+                )
+                or req.vehicle_size != "SUV_XL"
+                else 10.0
+            )
+            feature_score = 20.0
+            price_score = max(0.0, 15.0 - (hourly / 20.0))
+            avail_score = round(avail_ratio * 15.0, 1)
+            floor_bonus = 2.5 if slot.floor == 1 else 0.0
+
+            score = round(
+                min(
+                    99.8,
+                    dist_score
+                    + size_score
+                    + feature_score
+                    + price_score
+                    + avail_score
+                    + floor_bonus,
+                ),
+                1,
+            )
+
+            reasons: List[str] = [f"{dist_km} km from destination"]
+            if slot.slot_type == SlotType.EV_CHARGING:
+                reasons.append("50kW CCS2 Fast-Charger Ready")
+            if slot.slot_type == SlotType.SUV_XL:
+                reasons.append("SUV XL High-Clearance Bay")
+            if slot.slot_type == SlotType.ACCESSIBLE:
+                reasons.append("Step-Free Accessible Ground Bay")
+            if slot.floor == 1:
+                reasons.append("Quick Floor 01 Exit Access")
+
+            recommendations.append(
+                SlotRecommendationItem(
+                    lot_id=lot.id,
+                    lot_code=lot.code,
+                    lot_name=lot.name,
+                    city=lot.city,
+                    slot_id=slot.id,
+                    slot_number=slot.slot_number,
+                    floor=slot.floor,
+                    slot_type=slot.slot_type,
+                    distance_km=dist_km,
+                    estimated_total_inr=total_inr,
+                    match_score=score,
+                    reasons=reasons,
+                )
+            )
+
+    recommendations.sort(
+        key=lambda r: (-r.match_score, r.estimated_total_inr, r.distance_km)
+    )
+    return recommendations[:8]

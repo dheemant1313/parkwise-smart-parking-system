@@ -12,12 +12,17 @@ import {
   AIPricingForecast,
   AuditLogItem,
   Booking,
+  DriverNotification,
+  DriverProfile,
+  DriverVehicle,
   GateLogEntry,
   ParkingLot,
   ParkingSlot,
+  SlotRecommendation,
   SlotStatus,
   SlotType,
   UserRole,
+  VehicleSize,
 } from "@/types";
 import {
   generateDeterministicSignature,
@@ -97,14 +102,7 @@ function recalculateLotCounts(lot: RawParkingLot | ParkingLot): ParkingLot {
   };
 }
 
-const INITIAL_LOTS_RAW: Omit<
-  ParkingLot,
-  | "total_slots"
-  | "available_slots"
-  | "occupied_slots"
-  | "reserved_slots"
-  | "ev_slots_available"
->[] = [
+const INITIAL_LOTS_RAW: RawParkingLot[] = [
   {
     id: 1,
     code: "DEL-CP-01",
@@ -209,6 +207,51 @@ const INITIAL_LOTS_RAW: Omit<
 
 const INITIAL_LOTS: ParkingLot[] = INITIAL_LOTS_RAW.map(recalculateLotCounts);
 
+const INITIAL_VEHICLES: DriverVehicle[] = [
+  {
+    id: "veh-1",
+    plateNumber: "DL-08-CAF-8921",
+    modelName: "Tata Nexon EV Empowered+ LR",
+    size: "SEDAN",
+    dimensionsLabel: "3.99m × 1.81m × 1.62m",
+    isEv: true,
+    fastagId: "FT-NPCI-ICICI-892104",
+    isPrimary: true,
+  },
+  {
+    id: "veh-2",
+    plateNumber: "MH-01-AB-4589",
+    modelName: "Mahindra XUV700 AX7 Luxury",
+    size: "SUV_XL",
+    dimensionsLabel: "4.69m × 1.89m × 1.75m",
+    isEv: false,
+    fastagId: "FT-NPCI-HDFC-458912",
+    isPrimary: false,
+  },
+  {
+    id: "veh-3",
+    plateNumber: "KA-03-MN-1122",
+    modelName: "Hyundai i20 N-Line DCT",
+    size: "COMPACT",
+    dimensionsLabel: "3.99m × 1.77m × 1.50m",
+    isEv: false,
+    fastagId: "FT-NPCI-AXIS-112290",
+    isPrimary: false,
+  },
+];
+
+const INITIAL_PROFILE: DriverProfile = {
+  fullName: "Aarav Sharma",
+  email: "driver@parkwise.in",
+  phone: "+91-9811045210",
+  homeCity: "New Delhi",
+  fastagAutoDebit: true,
+  smsReceipts: true,
+  whatsappPassAlerts: true,
+  accessiblePriority: false,
+  gstNumber: "07AABCP9981K1Z5",
+};
+
 const DEMO_SIG = generateDeterministicSignature(
   "PW-DEMO-9012",
   101,
@@ -253,6 +296,28 @@ const INITIAL_BOOKINGS: Booking[] = [
   },
 ];
 
+const INITIAL_NOTIFICATIONS: DriverNotification[] = [
+  {
+    id: "notif-1",
+    title: "QR Gate Pass Active • PW-DEMO-9012",
+    message:
+      "Bay F1-A01 (EV 50kW Fast-Charge) at Connaught Place is locked for DL-08-CAF-8921.",
+    category: "BOOKING",
+    timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+    read: false,
+    bookingReference: "PW-DEMO-9012",
+  },
+  {
+    id: "notif-2",
+    title: "NPCI FASTag Auto-Debit Linked",
+    message:
+      "Your primary vehicle DL-08-CAF-8921 is pre-authorized for zero-stop boom-barrier entry.",
+    category: "GATE",
+    timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    read: true,
+  },
+];
+
 const INITIAL_GATE_LOGS: GateLogEntry[] = [
   {
     id: 1,
@@ -294,6 +359,7 @@ export interface CreateBookingInput {
   lotId: number;
   slotId: number;
   vehicleNumber: string;
+  vehicleSize?: VehicleSize;
   driverName: string;
   driverPhone: string;
   startTime: string;
@@ -301,15 +367,41 @@ export interface CreateBookingInput {
   paymentMethod: string;
 }
 
+export interface RecommendationCriteria {
+  searchQuery?: string;
+  city?: string;
+  targetLatitude?: number;
+  targetLongitude?: number;
+  vehicleSize: VehicleSize;
+  requiresEv: boolean;
+  requiresAccessible: boolean;
+  durationHours: number;
+  maxHourlyBudgetInr?: number;
+}
+
 interface ParkwiseContextValue {
   lots: ParkingLot[];
   bookings: Booking[];
   gateLogs: GateLogEntry[];
   auditLogs: AuditLogItem[];
+  vehicles: DriverVehicle[];
+  profile: DriverProfile;
+  notifications: DriverNotification[];
   activeRole: UserRole;
   setActiveRole: (role: UserRole) => void;
   backendConnected: boolean;
   createBookingAndVerifyPayment: (input: CreateBookingInput) => Promise<Booking>;
+  cancelBooking: (bookingReference: string) => Promise<Booking>;
+  extendBooking: (
+    bookingReference: string,
+    additionalHours: number
+  ) => Promise<Booking>;
+  getRecommendations: (criteria: RecommendationCriteria) => SlotRecommendation[];
+  addVehicle: (vehicle: Omit<DriverVehicle, "id">) => void;
+  removeVehicle: (id: string) => void;
+  setPrimaryVehicle: (id: string) => void;
+  updateProfile: (next: Partial<DriverProfile>) => void;
+  markAllNotificationsRead: () => void;
   processGateScan: (params: {
     bookingReference: string;
     qrSignature: string;
@@ -337,16 +429,37 @@ interface ParkwiseContextValue {
 
 const ParkwiseContext = createContext<ParkwiseContextValue | null>(null);
 
+function haversineKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const r = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return Math.round(r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 100) / 100;
+}
+
 export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
   const [lots, setLots] = useState<ParkingLot[]>(INITIAL_LOTS);
   const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
   const [gateLogs, setGateLogs] = useState<GateLogEntry[]>(INITIAL_GATE_LOGS);
   const [auditLogs, setAuditLogs] =
     useState<AuditLogItem[]>(INITIAL_AUDIT_LOGS);
+  const [vehicles, setVehicles] = useState<DriverVehicle[]>(INITIAL_VEHICLES);
+  const [profile, setProfile] = useState<DriverProfile>(INITIAL_PROFILE);
+  const [notifications, setNotifications] = useState<DriverNotification[]>(
+    INITIAL_NOTIFICATIONS
+  );
   const [activeRole, setActiveRole] = useState<UserRole>("DRIVER");
   const [backendConnected, setBackendConnected] = useState<boolean>(false);
 
-  // Hydrate from localStorage & probe live FastAPI backend
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -356,6 +469,10 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
         if (parsed.bookings?.length) setBookings(parsed.bookings);
         if (parsed.gateLogs?.length) setGateLogs(parsed.gateLogs);
         if (parsed.auditLogs?.length) setAuditLogs(parsed.auditLogs);
+        if (parsed.vehicles?.length) setVehicles(parsed.vehicles);
+        if (parsed.profile) setProfile(parsed.profile);
+        if (parsed.notifications?.length)
+          setNotifications(parsed.notifications);
       }
     } catch {
       // Ignore storage error
@@ -370,13 +487,15 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       });
   }, []);
 
-  // Persist to localStorage & cross-tab sync
   const persistState = useCallback(
     (
       nextLots: ParkingLot[],
       nextBookings: Booking[],
       nextGateLogs: GateLogEntry[],
-      nextAuditLogs: AuditLogItem[]
+      nextAuditLogs: AuditLogItem[],
+      nextVehicles: DriverVehicle[] = vehicles,
+      nextProfile: DriverProfile = profile,
+      nextNotifications: DriverNotification[] = notifications
     ) => {
       try {
         localStorage.setItem(
@@ -386,13 +505,16 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
             bookings: nextBookings,
             gateLogs: nextGateLogs,
             auditLogs: nextAuditLogs,
+            vehicles: nextVehicles,
+            profile: nextProfile,
+            notifications: nextNotifications,
           })
         );
       } catch {
         // Ignore quota errors
       }
     },
-    []
+    [vehicles, profile, notifications]
   );
 
   const createBookingAndVerifyPayment = useCallback(
@@ -422,6 +544,16 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      // Vehicle Size Compatibility Check
+      if (
+        input.vehicleSize === "SUV_XL" &&
+        slot.slot_type === "STANDARD"
+      ) {
+        throw new Error(
+          `Vehicle Size Compatibility Alert: SUV XL vehicles require an SUV_XL, EV_CHARGING, or ACCESSIBLE wide bay. Bay ${slot.slot_number} is a standard compact/sedan bay.`
+        );
+      }
+
       // Atomic Double-Booking Check across overlapping time windows
       const conflictingBooking = bookings.find((b) => {
         if (b.slot_id !== slot.id) return false;
@@ -437,6 +569,33 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
         throw new Error(
           `Double-Booking Prevented: Bay ${slot.slot_number} is already reserved during this window (Ref: ${conflictingBooking.booking_reference}).`
         );
+      }
+
+      // If connected to live FastAPI backend, also validate on backend and never simulate if backend rejects!
+      if (backendConnected) {
+        const backendSlotId = (slot.id % 100) + (lot.id - 1) * 16;
+        const apiRes = await fetch(`${API_BASE}/bookings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lot_id: lot.id,
+            slot_id: backendSlotId > 0 ? backendSlotId : slot.id,
+            vehicle_number: normalizedPlate,
+            driver_name: input.driverName.trim(),
+            driver_phone: input.driverPhone.trim(),
+            start_time: new Date(startMs).toISOString(),
+            end_time: new Date(endMs).toISOString(),
+          }),
+        });
+        if (!apiRes.ok) {
+          const errJson = await apiRes.json().catch(() => null);
+          const detail =
+            errJson?.detail ||
+            `Backend rejected booking with status ${apiRes.status}`;
+          throw new Error(
+            typeof detail === "string" ? detail : JSON.stringify(detail)
+          );
+        }
       }
 
       const durationHours = Math.max(
@@ -508,9 +667,20 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       });
 
       const nextBookings = [newBooking, ...bookings];
+      const nextNotif: DriverNotification = {
+        id: `notif-${Date.now()}`,
+        title: `Booking Confirmed • ${bookingRef}`,
+        message: `Reserved Bay ${slot.slot_number} at ${lot.name} (${lot.city}) for ${normalizedPlate}. Total paid: ₹${totalAmount}.`,
+        category: "BOOKING",
+        timestamp: new Date().toISOString(),
+        read: false,
+        bookingReference: bookingRef,
+      };
+      const nextNotifications = [nextNotif, ...notifications];
+
       const nextAudit: AuditLogItem = {
         id: auditLogs.length + 1,
-        actor_email: "driver@parkwise.in",
+        actor_email: profile.email,
         actor_role: "DRIVER",
         action: "BOOKING_AND_RAZORPAY_VERIFIED",
         target_resource: `${bookingRef} (${lot.code} / ${slot.slot_number})`,
@@ -521,13 +691,429 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
 
       setLots(nextLots);
       setBookings(nextBookings);
+      setNotifications(nextNotifications);
       setAuditLogs(nextAudits);
-      persistState(nextLots, nextBookings, gateLogs, nextAudits);
+      persistState(
+        nextLots,
+        nextBookings,
+        gateLogs,
+        nextAudits,
+        vehicles,
+        profile,
+        nextNotifications
+      );
 
       return newBooking;
     },
-    [lots, bookings, gateLogs, auditLogs, persistState]
+    [
+      lots,
+      bookings,
+      gateLogs,
+      auditLogs,
+      vehicles,
+      profile,
+      notifications,
+      backendConnected,
+      persistState,
+    ]
   );
+
+  const cancelBooking = useCallback(
+    async (bookingReference: string): Promise<Booking> => {
+      const target = bookings.find(
+        (b) => b.booking_reference === bookingReference
+      );
+      if (!target) {
+        throw new Error("Booking reference not found.");
+      }
+      if (target.status === "COMPLETED" || target.status === "CANCELLED") {
+        throw new Error(
+          `Cannot cancel a booking that is already ${target.status}.`
+        );
+      }
+
+      const updatedBooking: Booking = {
+        ...target,
+        status: "CANCELLED",
+        payment: {
+          ...target.payment,
+          status: "REFUNDED",
+        },
+      };
+
+      const nextBookings = bookings.map((b) =>
+        b.booking_reference === bookingReference ? updatedBooking : b
+      );
+
+      const nextLots = lots.map((l) => {
+        if (l.id !== target.lot_id) return l;
+        const updatedSlots = l.slots.map((s) =>
+          s.id === target.slot_id
+            ? { ...s, status: "AVAILABLE" as SlotStatus }
+            : s
+        );
+        return recalculateLotCounts({ ...l, slots: updatedSlots });
+      });
+
+      const nextNotif: DriverNotification = {
+        id: `notif-${Date.now()}`,
+        title: `Booking Cancelled & Refund Initiated • ${bookingReference}`,
+        message: `Bay ${target.slot_number} at ${target.lot_name} has been released. Refund of ₹${target.total_amount_inr} initiated to original payment rail.`,
+        category: "CANCELLATION",
+        timestamp: new Date().toISOString(),
+        read: false,
+        bookingReference,
+      };
+      const nextNotifications = [nextNotif, ...notifications];
+
+      setLots(nextLots);
+      setBookings(nextBookings);
+      setNotifications(nextNotifications);
+      persistState(
+        nextLots,
+        nextBookings,
+        gateLogs,
+        auditLogs,
+        vehicles,
+        profile,
+        nextNotifications
+      );
+
+      return updatedBooking;
+    },
+    [lots, bookings, gateLogs, auditLogs, vehicles, profile, notifications, persistState]
+  );
+
+  const extendBooking = useCallback(
+    async (
+      bookingReference: string,
+      additionalHours: number
+    ): Promise<Booking> => {
+      if (additionalHours <= 0 || additionalHours > 24) {
+        throw new Error("Extension must be between 1 and 24 hours.");
+      }
+      const target = bookings.find(
+        (b) => b.booking_reference === bookingReference
+      );
+      if (!target) {
+        throw new Error("Booking reference not found.");
+      }
+      if (!["CONFIRMED", "ACTIVE", "PENDING_PAYMENT"].includes(target.status)) {
+        throw new Error(
+          `Cannot extend a booking in ${target.status} status.`
+        );
+      }
+
+      const currentEndMs = new Date(target.end_time).getTime();
+      const newEndMs = currentEndMs + additionalHours * 3600000;
+
+      // Verify zero overlap with any other reservation on the same bay
+      const conflict = bookings.find((other) => {
+        if (other.booking_reference === target.booking_reference) return false;
+        if (other.slot_id !== target.slot_id) return false;
+        if (!["PENDING_PAYMENT", "CONFIRMED", "ACTIVE"].includes(other.status))
+          return false;
+        const oStart = new Date(other.start_time).getTime();
+        const oEnd = new Date(other.end_time).getTime();
+        return currentEndMs < oEnd && newEndMs > oStart;
+      });
+
+      if (conflict) {
+        throw new Error(
+          `Extension rejected: Bay ${target.slot_number} is reserved by ${conflict.booking_reference} during the extended window.`
+        );
+      }
+
+      const lot = lots.find((l) => l.id === target.lot_id) || lots[0];
+      const slot = lot.slots.find((s) => s.id === target.slot_id);
+      let hourlyRate = lot.base_hourly_rate_inr;
+      if (slot?.slot_type === "EV_CHARGING") hourlyRate += lot.ev_surcharge_inr;
+      if (slot?.slot_type === "SUV_XL") hourlyRate += 25;
+
+      const newDuration =
+        Math.round((target.duration_hours + additionalHours) * 100) / 100;
+      const newBase =
+        Math.round(
+          hourlyRate * newDuration * target.surge_multiplier * 100
+        ) / 100;
+      const newGst = Math.round(newBase * 0.18 * 100) / 100;
+      const newTotal = Math.round((newBase + newGst) * 100) / 100;
+
+      const updatedBooking: Booking = {
+        ...target,
+        end_time: new Date(newEndMs).toISOString(),
+        duration_hours: newDuration,
+        base_amount_inr: newBase,
+        gst_amount_inr: newGst,
+        total_amount_inr: newTotal,
+        payment: {
+          ...target.payment,
+          amount_inr: newTotal,
+        },
+      };
+
+      const nextBookings = bookings.map((b) =>
+        b.booking_reference === bookingReference ? updatedBooking : b
+      );
+
+      const nextNotif: DriverNotification = {
+        id: `notif-${Date.now()}`,
+        title: `Parking Extended (+${additionalHours}h) • ${bookingReference}`,
+        message: `Extended bay ${target.slot_number} until ${new Date(
+          newEndMs
+        ).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}. Updated total: ₹${newTotal}.`,
+        category: "EXTENSION",
+        timestamp: new Date().toISOString(),
+        read: false,
+        bookingReference,
+      };
+      const nextNotifications = [nextNotif, ...notifications];
+
+      setBookings(nextBookings);
+      setNotifications(nextNotifications);
+      persistState(
+        lots,
+        nextBookings,
+        gateLogs,
+        auditLogs,
+        vehicles,
+        profile,
+        nextNotifications
+      );
+
+      return updatedBooking;
+    },
+    [lots, bookings, gateLogs, auditLogs, vehicles, profile, notifications, persistState]
+  );
+
+  const getRecommendations = useCallback(
+    (criteria: RecommendationCriteria): SlotRecommendation[] => {
+      const q = (criteria.searchQuery || "").trim().toLowerCase();
+      const cityFilter = (criteria.city || "").trim().toLowerCase();
+
+      const matchingLots = lots.filter((lot) => {
+        if (
+          cityFilter &&
+          cityFilter !== "all" &&
+          lot.city.toLowerCase() !== cityFilter
+        ) {
+          return false;
+        }
+        if (q) {
+          const hay =
+            `${lot.name} ${lot.city} ${lot.address} ${lot.code}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      const refLat =
+        criteria.targetLatitude ?? matchingLots[0]?.latitude ?? 28.6315;
+      const refLon =
+        criteria.targetLongitude ?? matchingLots[0]?.longitude ?? 77.2167;
+
+      const results: SlotRecommendation[] = [];
+
+      for (const lot of matchingLots) {
+        const distKm = haversineKm(refLat, refLon, lot.latitude, lot.longitude);
+        const availRatio =
+          lot.available_slots / Math.max(1, lot.total_slots);
+
+        for (const slot of lot.slots) {
+          if (slot.status !== "AVAILABLE") continue;
+          if (criteria.requiresEv && slot.slot_type !== "EV_CHARGING") continue;
+          if (criteria.requiresAccessible && slot.slot_type !== "ACCESSIBLE")
+            continue;
+          if (
+            criteria.vehicleSize === "SUV_XL" &&
+            slot.slot_type === "STANDARD"
+          ) {
+            continue;
+          }
+
+          let hourly = lot.base_hourly_rate_inr;
+          if (slot.slot_type === "EV_CHARGING") hourly += lot.ev_surcharge_inr;
+          if (slot.slot_type === "SUV_XL") hourly += 25;
+
+          if (
+            criteria.maxHourlyBudgetInr &&
+            hourly > criteria.maxHourlyBudgetInr
+          ) {
+            continue;
+          }
+
+          const surge = lot.dynamic_pricing_enabled
+            ? lot.current_surge_multiplier
+            : 1.0;
+          const totalInr =
+            Math.round(
+              hourly * criteria.durationHours * surge * 1.18 * 100
+            ) / 100;
+
+          const distScore = Math.max(0, 30 - Math.min(30, distKm * 1.4));
+          const sizeScore =
+            criteria.vehicleSize === "SUV_XL" && slot.slot_type === "SUV_XL"
+              ? 22
+              : 18;
+          const evScore =
+            criteria.requiresEv && slot.slot_type === "EV_CHARGING" ? 20 : 16;
+          const priceScore = Math.max(0, 15 - hourly / 18);
+          const availScore = Math.round(availRatio * 15 * 10) / 10;
+          const floorBonus = slot.floor === 1 ? 3 : 0;
+
+          const score = Math.min(
+            99.8,
+            Math.round(
+              (distScore +
+                sizeScore +
+                evScore +
+                priceScore +
+                availScore +
+                floorBonus) *
+                10
+            ) / 10
+          );
+
+          const reasons: string[] = [];
+          if (distKm < 2.5) reasons.push("Closest to destination");
+          else reasons.push(`${distKm} km from landmark`);
+
+          if (slot.slot_type === "EV_CHARGING")
+            reasons.push("50kW CCS2 Fast-Charge");
+          if (slot.slot_type === "SUV_XL")
+            reasons.push("SUV XL High-Clearance Fit");
+          if (slot.slot_type === "ACCESSIBLE")
+            reasons.push("Barrier-Free Ground Access");
+          if (slot.floor === 1) reasons.push("Floor 01 Express Exit");
+
+          results.push({
+            lotId: lot.id,
+            lotCode: lot.code,
+            lotName: lot.name,
+            city: lot.city,
+            slotId: slot.id,
+            slotNumber: slot.slot_number,
+            floor: slot.floor,
+            zone: slot.zone,
+            slotType: slot.slot_type,
+            distanceKm: distKm,
+            estimatedTotalInr: totalInr,
+            matchScore: score,
+            reasons,
+          });
+        }
+      }
+
+      results.sort(
+        (a, b) =>
+          b.matchScore - a.matchScore ||
+          a.estimatedTotalInr - b.estimatedTotalInr
+      );
+      return results.slice(0, 6);
+    },
+    [lots]
+  );
+
+  const addVehicle = useCallback(
+    (vehicleInput: Omit<DriverVehicle, "id">) => {
+      const normalized = vehicleInput.plateNumber.trim().toUpperCase();
+      if (!isValidIndianPlate(normalized)) {
+        throw new Error(
+          "Invalid Indian RTO vehicle registration format (e.g., DL-08-CAF-8921)."
+        );
+      }
+      const newVeh: DriverVehicle = {
+        ...vehicleInput,
+        id: `veh-${Date.now()}`,
+        plateNumber: normalized,
+      };
+      const nextVehicles = newVeh.isPrimary
+        ? [newVeh, ...vehicles.map((v) => ({ ...v, isPrimary: false }))]
+        : [...vehicles, newVeh];
+      setVehicles(nextVehicles);
+      persistState(
+        lots,
+        bookings,
+        gateLogs,
+        auditLogs,
+        nextVehicles,
+        profile,
+        notifications
+      );
+    },
+    [lots, bookings, gateLogs, auditLogs, vehicles, profile, notifications, persistState]
+  );
+
+  const removeVehicle = useCallback(
+    (id: string) => {
+      const nextVehicles = vehicles.filter((v) => v.id !== id);
+      setVehicles(nextVehicles);
+      persistState(
+        lots,
+        bookings,
+        gateLogs,
+        auditLogs,
+        nextVehicles,
+        profile,
+        notifications
+      );
+    },
+    [lots, bookings, gateLogs, auditLogs, vehicles, profile, notifications, persistState]
+  );
+
+  const setPrimaryVehicle = useCallback(
+    (id: string) => {
+      const nextVehicles = vehicles.map((v) => ({
+        ...v,
+        isPrimary: v.id === id,
+      }));
+      setVehicles(nextVehicles);
+      persistState(
+        lots,
+        bookings,
+        gateLogs,
+        auditLogs,
+        nextVehicles,
+        profile,
+        notifications
+      );
+    },
+    [lots, bookings, gateLogs, auditLogs, vehicles, profile, notifications, persistState]
+  );
+
+  const updateProfile = useCallback(
+    (next: Partial<DriverProfile>) => {
+      const updated = { ...profile, ...next };
+      setProfile(updated);
+      persistState(
+        lots,
+        bookings,
+        gateLogs,
+        auditLogs,
+        vehicles,
+        updated,
+        notifications
+      );
+    },
+    [lots, bookings, gateLogs, auditLogs, vehicles, profile, notifications, persistState]
+  );
+
+  const markAllNotificationsRead = useCallback(() => {
+    const nextNotifs = notifications.map((n) => ({ ...n, read: true }));
+    setNotifications(nextNotifs);
+    persistState(
+      lots,
+      bookings,
+      gateLogs,
+      auditLogs,
+      vehicles,
+      profile,
+      nextNotifs
+    );
+  }, [lots, bookings, gateLogs, auditLogs, vehicles, profile, notifications, persistState]);
 
   const processGateScan = useCallback(
     async (params: {
@@ -733,7 +1319,10 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
         const eveningRush = 30 * Math.exp(-0.5 * Math.pow((h - 19.0) / 2.4, 2));
         const predicted = Math.min(
           98,
-          Math.max(14, Math.round((occPct * 0.65 + morningRush + eveningRush) * 10) / 10)
+          Math.max(
+            14,
+            Math.round((occPct * 0.65 + morningRush + eveningRush) * 10) / 10
+          )
         );
         let mult = 1.0;
         if (predicted >= 82) mult = 1.45;
@@ -777,6 +1366,9 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
     setBookings(INITIAL_BOOKINGS);
     setGateLogs(INITIAL_GATE_LOGS);
     setAuditLogs(INITIAL_AUDIT_LOGS);
+    setVehicles(INITIAL_VEHICLES);
+    setProfile(INITIAL_PROFILE);
+    setNotifications(INITIAL_NOTIFICATIONS);
   }, []);
 
   const value = useMemo(
@@ -785,10 +1377,21 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       bookings,
       gateLogs,
       auditLogs,
+      vehicles,
+      profile,
+      notifications,
       activeRole,
       setActiveRole,
       backendConnected,
       createBookingAndVerifyPayment,
+      cancelBooking,
+      extendBooking,
+      getRecommendations,
+      addVehicle,
+      removeVehicle,
+      setPrimaryVehicle,
+      updateProfile,
+      markAllNotificationsRead,
       processGateScan,
       updateSlotStatus,
       updateLotSurge,
@@ -800,9 +1403,20 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       bookings,
       gateLogs,
       auditLogs,
+      vehicles,
+      profile,
+      notifications,
       activeRole,
       backendConnected,
       createBookingAndVerifyPayment,
+      cancelBooking,
+      extendBooking,
+      getRecommendations,
+      addVehicle,
+      removeVehicle,
+      setPrimaryVehicle,
+      updateProfile,
+      markAllNotificationsRead,
       processGateScan,
       updateSlotStatus,
       updateLotSurge,

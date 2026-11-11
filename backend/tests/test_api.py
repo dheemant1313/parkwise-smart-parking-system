@@ -1,4 +1,4 @@
-"""Comprehensive Integration Test Suite for Parkwise Enterprise Backend."""
+"""Comprehensive Integration Test Suite for Parkwise Enterprise Backend (Phases 01 & 02)."""
 from datetime import datetime, timedelta, timezone
 from typing import Any, Coroutine
 import pytest
@@ -6,9 +6,12 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from app.database import Base, SessionLocal, engine
 from app.main import (
+    cancel_booking,
     create_booking,
+    extend_booking,
     get_admin_overview,
     get_ai_forecast,
+    get_driver_recommendations,
     get_parking_lot_detail,
     health_check,
     list_parking_lots,
@@ -21,6 +24,8 @@ from app.main import (
 from app.models import SlotStatus, User, UserRole
 from app.schemas import (
     BookingCreateRequest,
+    BookingExtendRequest,
+    DriverRecommendationRequest,
     GateScanRequest,
     LoginRequest,
     PaymentVerifyRequest,
@@ -64,7 +69,25 @@ def test_enterprise_parkwise_lifecycle():
         assert len(available_slots) > 0
         target_slot_id = available_slots[0]["id"]
 
-        # 3. Validate Strict Indian Vehicle Plate Format (Reject Invalid Plate)
+        # 3. Phase 02 Deterministic Recommendation Engine Check
+        recs = _run_sync(
+            get_driver_recommendations(
+                payload=DriverRecommendationRequest(
+                    city="Mumbai",
+                    target_latitude=19.0607,
+                    target_longitude=72.8633,
+                    vehicle_size="SUV_XL",
+                    requires_ev=False,
+                    requires_accessible=False,
+                    duration_hours=3.0,
+                ),
+                db=db,
+            )
+        )
+        assert len(recs) > 0
+        assert all(r.slot_type.value in ("SUV_XL", "ACCESSIBLE") for r in recs)
+
+        # 4. Validate Strict Indian Vehicle Plate Format (Reject Invalid Plate)
         now = datetime.now(timezone.utc)
         with pytest.raises(ValidationError):
             BookingCreateRequest(
@@ -77,7 +100,7 @@ def test_enterprise_parkwise_lifecycle():
                 end_time=now + timedelta(hours=3),
             )
 
-        # 4. Create Transactional Booking
+        # 5. Create Transactional Booking
         valid_req = BookingCreateRequest(
             lot_id=lot_id,
             slot_id=target_slot_id,
@@ -94,7 +117,7 @@ def test_enterprise_parkwise_lifecycle():
         order_id = booking.payment.razorpay_order_id
         qr_signature = booking.qr_signature
 
-        # 5. Double-Booking Prevention Test (Overlapping Window -> 409 Conflict)
+        # 6. Double-Booking Prevention Test (Overlapping Window -> 409 Conflict)
         overlap_req = BookingCreateRequest(
             lot_id=lot_id,
             slot_id=target_slot_id,
@@ -109,7 +132,7 @@ def test_enterprise_parkwise_lifecycle():
         assert exc_info.value.status_code == 409
         assert "Double-booking prevented" in exc_info.value.detail
 
-        # 6. Server-Side Payment Verification (Razorpay Order Capture)
+        # 7. Server-Side Payment Verification (Razorpay Order Capture)
         pay_req = PaymentVerifyRequest(
             booking_reference=booking_ref,
             razorpay_order_id=order_id,
@@ -119,7 +142,18 @@ def test_enterprise_parkwise_lifecycle():
         paid_booking = _run_sync(verify_payment(payload=pay_req, db=db))
         assert paid_booking.status.value == "CONFIRMED"
 
-        # 7. Gate Terminal Cryptographic Verification (Reject Tampered Signature)
+        # 8. Phase 02 Booking Extension Test
+        extended_booking = _run_sync(
+            extend_booking(
+                booking_reference=booking_ref,
+                payload=BookingExtendRequest(additional_hours=2.0),
+                db=db,
+            )
+        )
+        assert extended_booking.duration_hours == 4.0
+        assert extended_booking.total_amount_inr > paid_booking.total_amount_inr
+
+        # 9. Gate Terminal Cryptographic Verification (Reject Tampered Signature)
         forged_req = GateScanRequest(
             lot_id=lot_id,
             booking_reference=booking_ref,
@@ -131,7 +165,7 @@ def test_enterprise_parkwise_lifecycle():
             _run_sync(process_gate_scan(payload=forged_req, db=db))
         assert gate_exc.value.status_code == 403
 
-        # 8. Gate Terminal Valid ENTRY & EXIT
+        # 10. Gate Terminal Valid ENTRY & EXIT
         entry_req = GateScanRequest(
             lot_id=lot_id,
             booking_reference=booking_ref,
@@ -152,7 +186,31 @@ def test_enterprise_parkwise_lifecycle():
         exit_res = _run_sync(process_gate_scan(payload=exit_req, db=db))
         assert exit_res.event_type == "EXIT"
 
-        # 9. Role-Based Access Control (RBAC) & Operator Controls
+        # 11. Phase 02 Booking Cancellation Test on a Fresh Reservation
+        second_slot_id = available_slots[1]["id"]
+        cancellable_booking = _run_sync(
+            create_booking(
+                payload=BookingCreateRequest(
+                    lot_id=lot_id,
+                    slot_id=second_slot_id,
+                    vehicle_number="DL-01-AB-9999",
+                    driver_name="Karan Mehta",
+                    driver_phone="+919811009988",
+                    start_time=now + timedelta(hours=5),
+                    end_time=now + timedelta(hours=7),
+                ),
+                db=db,
+            )
+        )
+        cancelled_res = _run_sync(
+            cancel_booking(
+                booking_reference=cancellable_booking.booking_reference,
+                db=db,
+            )
+        )
+        assert cancelled_res.status.value == "CANCELLED"
+
+        # 12. Role-Based Access Control (RBAC) & Operator Controls
         login_res = _run_sync(
             login(
                 payload=LoginRequest(
@@ -191,7 +249,7 @@ def test_enterprise_parkwise_lifecycle():
         )
         assert updated_lot["current_surge_multiplier"] == 1.55
 
-        # 10. AI Forecasting Engine Verification
+        # 13. AI Forecasting Engine Verification
         ai_data = _run_sync(get_ai_forecast(lot_id=lot_id, db=db))
         assert ai_data.is_live_ml_inference is True
         assert len(ai_data.hourly_forecast) == 12

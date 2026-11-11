@@ -28,13 +28,16 @@ from app.models import (
 from app.schemas import (
     AIPricingRecommendationResponse,
     BookingCreateRequest,
+    BookingExtendRequest,
     BookingResponse,
+    DriverRecommendationRequest,
     GateScanRequest,
     GateScanResponse,
     LoginRequest,
     ParkingLotDetailResponse,
     ParkingLotResponse,
     PaymentVerifyRequest,
+    SlotRecommendationItem,
     SlotResponse,
     SlotStatusUpdateRequest,
     SurgeUpdateRequest,
@@ -43,7 +46,10 @@ from app.schemas import (
 from app.seed import seed_initial_data
 from app.services.ai_engine import ai_engine
 from app.services.booking_service import (
+    cancel_transactional_booking,
+    compute_driver_recommendations,
     create_transactional_booking,
+    extend_transactional_booking,
     verify_qr_signature,
 )
 from app.services.payment_service import verify_and_capture_payment
@@ -245,7 +251,7 @@ async def get_parking_lot_detail(lot_id: int, db: Session = Depends(get_db)):
 
 
 # ----------------------------------------------------------------------------
-# 4. Transactional Bookings & Double-Booking Prevention
+# 4. Transactional Bookings, Cancellation, Extension & Recommendations
 # ----------------------------------------------------------------------------
 @app.post(
     "/api/v1/bookings",
@@ -291,6 +297,62 @@ async def list_bookings(
         )
     bookings = query.order_by(Booking.created_at.desc()).limit(50).all()
     return [_serialize_booking(b) for b in bookings]
+
+
+@app.post(
+    "/api/v1/bookings/{booking_reference}/cancel",
+    response_model=BookingResponse,
+)
+async def cancel_booking(
+    booking_reference: str,
+    db: Session = Depends(get_db),
+):
+    booking = cancel_transactional_booking(db, booking_reference)
+    serialized = _serialize_booking(booking)
+    await ws_manager.broadcast_event(
+        "BOOKING_CANCELLED",
+        {
+            "booking_reference": booking.booking_reference,
+            "slot_id": booking.slot_id,
+            "status": booking.status.value,
+        },
+    )
+    return serialized
+
+
+@app.post(
+    "/api/v1/bookings/{booking_reference}/extend",
+    response_model=BookingResponse,
+)
+async def extend_booking(
+    booking_reference: str,
+    payload: BookingExtendRequest,
+    db: Session = Depends(get_db),
+):
+    booking = extend_transactional_booking(
+        db, booking_reference, payload.additional_hours
+    )
+    serialized = _serialize_booking(booking)
+    await ws_manager.broadcast_event(
+        "BOOKING_EXTENDED",
+        {
+            "booking_reference": booking.booking_reference,
+            "duration_hours": booking.duration_hours,
+            "total_amount_inr": booking.total_amount_inr,
+        },
+    )
+    return serialized
+
+
+@app.post(
+    "/api/v1/driver/recommendations",
+    response_model=List[SlotRecommendationItem],
+)
+async def get_driver_recommendations(
+    payload: DriverRecommendationRequest,
+    db: Session = Depends(get_db),
+):
+    return compute_driver_recommendations(db, payload)
 
 
 # ----------------------------------------------------------------------------

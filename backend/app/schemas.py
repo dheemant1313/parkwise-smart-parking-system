@@ -94,6 +94,35 @@ class BookingCreateRequest(BaseModel):
         return end_time
 
 
+class BookingExtendRequest(BaseModel):
+    additional_hours: float = Field(..., gt=0, le=24)
+
+
+class DriverRecommendationRequest(BaseModel):
+    city: Optional[str] = None
+    target_latitude: float = 28.6315
+    target_longitude: float = 77.2167
+    vehicle_size: str = Field("SEDAN", pattern="^(COMPACT|SEDAN|SUV_XL)$")
+    requires_ev: bool = False
+    requires_accessible: bool = False
+    duration_hours: float = Field(2.0, gt=0, le=24)
+
+
+class SlotRecommendationItem(BaseModel):
+    lot_id: int
+    lot_code: str
+    lot_name: str
+    city: str
+    slot_id: int
+    slot_number: str
+    floor: int
+    slot_type: SlotType
+    distance_km: float
+    estimated_total_inr: float
+    match_score: float
+    reasons: List[str]
+
+
 class PaymentSummary(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: Optional[str] = None

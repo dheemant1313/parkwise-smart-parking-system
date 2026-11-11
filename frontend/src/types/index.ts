@@ -4,6 +4,8 @@ export type SlotType = "STANDARD" | "EV_CHARGING" | "ACCESSIBLE" | "SUV_XL";
 
 export type SlotStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "MAINTENANCE";
 
+export type VehicleSize = "COMPACT" | "SEDAN" | "SUV_XL";
+
 export type BookingStatus =
   | "PENDING_PAYMENT"
   | "CONFIRMED"
@@ -17,6 +19,55 @@ export type PaymentStatus =
   | "CAPTURED"
   | "FAILED"
   | "REFUNDED";
+
+export interface DriverVehicle {
+  id: string;
+  plateNumber: string;
+  modelName: string;
+  size: VehicleSize;
+  dimensionsLabel: string;
+  isEv: boolean;
+  fastagId: string;
+  isPrimary: boolean;
+}
+
+export interface DriverProfile {
+  fullName: string;
+  email: string;
+  phone: string;
+  homeCity: string;
+  fastagAutoDebit: boolean;
+  smsReceipts: boolean;
+  whatsappPassAlerts: boolean;
+  accessiblePriority: boolean;
+  gstNumber?: string;
+}
+
+export interface DriverNotification {
+  id: string;
+  title: string;
+  message: string;
+  category: "BOOKING" | "PAYMENT" | "EXTENSION" | "CANCELLATION" | "GATE";
+  timestamp: string;
+  read: boolean;
+  bookingReference?: string;
+}
+
+export interface SlotRecommendation {
+  lotId: number;
+  lotCode: string;
+  lotName: string;
+  city: string;
+  slotId: number;
+  slotNumber: string;
+  floor: number;
+  zone: string;
+  slotType: SlotType;
+  distanceKm: number;
+  estimatedTotalInr: number;
+  matchScore: number;
+  reasons: string[];
+}
 
 export interface ParkingSlot {
   id: number;
@@ -99,7 +150,12 @@ export interface GateLogEntry {
   lot_id: number;
   booking_reference: string;
   vehicle_number: string;
-  event_type: "ENTRY" | "EXIT" | "DENIED_INVALID_SIGNATURE" | "PRE_AUTH_READY" | "MANUAL_OVERRIDE";
+  event_type:
+    | "ENTRY"
+    | "EXIT"
+    | "DENIED_INVALID_SIGNATURE"
+    | "PRE_AUTH_READY"
+    | "MANUAL_OVERRIDE";
   gate_lane: string;
   anpr_confidence: number;
   verification_method: string;
