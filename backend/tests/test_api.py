@@ -1,4 +1,4 @@
-"""Comprehensive Integration Test Suite for Parkwise Enterprise Backend (Phases 01, 02 & 03)."""
+"""Comprehensive Integration Test Suite for Parkwise Enterprise Backend (Phases 01, 02, 03 & 04)."""
 from datetime import datetime, timedelta, timezone
 from typing import Any, Coroutine
 import pytest
@@ -12,8 +12,17 @@ from app.main import (
     admin_list_users,
     admin_update_user_role,
     admin_update_user_status,
+    apply_booking_additional_charges,
+    assign_parking_bay_type,
+    calculate_booking_duration_and_quote,
     cancel_booking,
+    check_inventory_time_range_availability,
     create_booking,
+    create_location_pricing_rule,
+    create_parking_bay,
+    create_parking_floor,
+    create_parking_location,
+    create_parking_zone,
     deactivate_my_account,
     delete_user_vehicle,
     extend_booking,
@@ -25,40 +34,57 @@ from app.main import (
     get_parking_lot_detail,
     get_roles_and_permissions,
     health_check,
+    list_booking_events,
+    list_location_pricing_rules,
     list_parking_lots,
+    list_parking_operators,
     list_security_audit_logs,
     list_user_sessions,
     list_user_vehicles,
+    list_vehicle_categories,
     login,
     logout,
     process_gate_scan,
     register_user,
     reset_password,
     revoke_user_session,
+    search_available_parking,
     set_primary_user_vehicle,
+    trigger_release_expired_reservations,
+    update_location_opening_hours,
     update_lot_surge,
     update_profile,
     update_slot_status,
     verify_email,
     verify_payment,
 )
-from app.models import SlotStatus, User, UserRole
+from app.models import Booking, SlotStatus, SlotType, User, UserRole
 from app.schemas import (
+    AdditionalChargesRequest,
     AdminRoleUpdateRequest,
     AdminStatusUpdateRequest,
+    BayTypeAssignRequest,
     BookingCreateRequest,
     BookingExtendRequest,
     DriverRecommendationRequest,
+    DurationAndQuoteRequest,
     EmailVerificationRequest,
     ForgotPasswordRequest,
     GateScanRequest,
+    LocationOpeningHoursUpdateRequest,
     LoginRequest,
+    ParkingBayCreateRequest,
+    ParkingFloorCreateRequest,
+    ParkingLocationCreateRequest,
+    ParkingZoneCreateRequest,
     PaymentVerifyRequest,
+    PricingRuleCreateRequest,
     ProfileUpdateRequest,
     RegisterRequest,
     ResetPasswordRequest,
     SlotStatusUpdateRequest,
     SurgeUpdateRequest,
+    TimeRangeAvailabilityRequest,
     VehicleCreateRequest,
 )
 from app.seed import seed_initial_data
@@ -589,4 +615,366 @@ def test_phase03_authentication_rbac_and_user_management():
         assert "ACCOUNT_DEACTIVATED" in actions
     finally:
         auth_rate_limiter.reset()
+        db.close()
+
+
+def test_phase04_inventory_and_booking_engine():
+    auth_rate_limiter.reset()
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        seed_initial_data(db)
+
+        # 1. Verify Seeded Parking Operators & Vehicle Categories
+        operators = _run_sync(list_parking_operators(db=db))
+        assert len(operators) >= 5
+        categories = _run_sync(list_vehicle_categories(db=db))
+        assert len(categories) >= 5
+
+        # 2. Create and Manage a New Parking Location
+        new_loc = _run_sync(
+            create_parking_location(
+                payload=ParkingLocationCreateRequest(
+                    code="PW-PUN-06",
+                    name="Hinjawadi Phase 2 CyberHub Smart Deck",
+                    city="Pune",
+                    address="Rajiv Gandhi Infotech Park, Hinjawadi, Pune 411057",
+                    latitude=18.5913,
+                    longitude=73.7389,
+                    total_floors=2,
+                    base_hourly_rate_inr=70.0,
+                    ev_surcharge_inr=35.0,
+                    operator_name="Pune Smart Mobility Hub Pvt. Ltd.",
+                    is_24_hours=False,
+                    opening_time="06:00",
+                    closing_time="23:30",
+                ),
+                db=db,
+            )
+        )
+        lot_id = new_loc["id"]
+        assert new_loc["code"] == "PW-PUN-06"
+        assert len(new_loc["floors"]) == 2
+        assert len(new_loc["schedules"]) == 7
+
+        # 3. Configure Floors and Zones
+        floor3 = _run_sync(
+            create_parking_floor(
+                lot_id=lot_id,
+                payload=ParkingFloorCreateRequest(
+                    floor_number=3,
+                    floor_name="Level B3 — Executive EV & SUV Deck",
+                    clearance_height_m=2.30,
+                    total_bays=12,
+                    has_ev_chargers=True,
+                ),
+                db=db,
+            )
+        )
+        assert floor3.floor_number == 3
+
+        zone_b = _run_sync(
+            create_parking_zone(
+                lot_id=lot_id,
+                payload=ParkingZoneCreateRequest(
+                    floor_id=floor3.id,
+                    zone_code="B",
+                    zone_name="Level B3 Zone B (Hypercharge EV Wing)",
+                    dedicated_category="EV_FOUR_WHEELER",
+                ),
+                db=db,
+            )
+        )
+        assert zone_b.zone_code == "B"
+
+        # 4. Create Individual Parking Bays & Assign Bay Types
+        bay1 = _run_sync(
+            create_parking_bay(
+                lot_id=lot_id,
+                payload=ParkingBayCreateRequest(
+                    slot_number="B3-B01",
+                    floor=3,
+                    zone="B",
+                    slot_type=SlotType.STANDARD,
+                    vehicle_category_code="SEDAN",
+                ),
+                db=db,
+            )
+        )
+        bay2 = _run_sync(
+            create_parking_bay(
+                lot_id=lot_id,
+                payload=ParkingBayCreateRequest(
+                    slot_number="B3-B02",
+                    floor=3,
+                    zone="B",
+                    slot_type=SlotType.SUV_XL,
+                    vehicle_category_code="SUV_XL",
+                ),
+                db=db,
+            )
+        )
+        assert bay1.slot_number == "B3-B01"
+
+        reassigned_bay1 = _run_sync(
+            assign_parking_bay_type(
+                slot_id=bay1.id,
+                payload=BayTypeAssignRequest(
+                    slot_type=SlotType.EV_CHARGING,
+                    vehicle_category_code="EV_FOUR_WHEELER",
+                    power_kw=50.0,
+                    custom_hourly_rate_inr=90.0,
+                ),
+                db=db,
+            )
+        )
+        assert reassigned_bay1.slot_type == SlotType.EV_CHARGING
+        assert reassigned_bay1.power_kw == 50.0
+
+        # 5. Set Opening Hours & Configure Parking Prices
+        updated_sched_lot = _run_sync(
+            update_location_opening_hours(
+                lot_id=lot_id,
+                payload=LocationOpeningHoursUpdateRequest(
+                    opening_time="05:00",
+                    closing_time="23:59",
+                    is_24_hours=True,
+                    grace_period_minutes=20,
+                    reservation_hold_minutes=15,
+                    peak_start_time="08:30",
+                    peak_end_time="20:30",
+                ),
+                db=db,
+            )
+        )
+        assert updated_sched_lot["is_24_hours"] is True
+        assert updated_sched_lot["grace_period_minutes"] == 20
+
+        rule = _run_sync(
+            create_location_pricing_rule(
+                lot_id=lot_id,
+                payload=PricingRuleCreateRequest(
+                    rule_name="Pune IT Corridor Peak Surge",
+                    rule_type="PEAK_HOUR",
+                    multiplier=1.20,
+                    flat_surcharge_inr=25.0,
+                    min_duration_hours=1.0,
+                    applies_to_slot_type="ALL",
+                ),
+                db=db,
+            )
+        )
+        assert rule.multiplier == 1.20
+        all_rules = _run_sync(list_location_pricing_rules(lot_id=lot_id, db=db))
+        assert len(all_rules) >= 1
+
+        # 6. Search Available Parking & Check Availability for a Time Range
+        pune_lots = _run_sync(
+            search_available_parking(
+                city="Pune",
+                slot_type=SlotType.EV_CHARGING,
+                vehicle_category=None,
+                max_hourly_rate_inr=120.0,
+                min_available_bays=1,
+                db=db,
+            )
+        )
+        assert any(l["code"] == "PW-PUN-06" for l in pune_lots)
+
+        now = datetime.now(timezone.utc)
+        t_start = now + timedelta(hours=2)
+        t_end = now + timedelta(hours=5)
+
+        avail_before = _run_sync(
+            check_inventory_time_range_availability(
+                payload=TimeRangeAvailabilityRequest(
+                    lot_id=lot_id,
+                    start_time=t_start,
+                    end_time=t_end,
+                ),
+                db=db,
+            )
+        )
+        assert avail_before.available_bay_count == 2
+        assert avail_before.conflicting_bay_count == 0
+
+        # 7. Calculate Parking Duration & Pricing Quote
+        quote = _run_sync(
+            calculate_booking_duration_and_quote(
+                payload=DurationAndQuoteRequest(
+                    lot_id=lot_id,
+                    slot_id=bay1.id,
+                    start_time=t_start,
+                    end_time=t_end,
+                    vehicle_category="EV_FOUR_WHEELER",
+                    include_valet_service=True,
+                    include_ev_fast_charge=True,
+                    overstay_minutes=30,
+                ),
+                db=db,
+            )
+        )
+        assert quote.duration_hours == 3.0
+        assert quote.ev_charging_fee_inr > 0
+        assert quote.valet_or_amenity_fee_inr == 120.0
+        assert quote.grand_total_inr > quote.subtotal_before_tax_inr
+
+        # 8. Idempotent Bay Reservation (Same idempotency_key returns identical booking without duplicate)
+        idem_key = "IDEM-PUN-BAY1-2026-0001"
+        b1 = _run_sync(
+            create_booking(
+                payload=BookingCreateRequest(
+                    lot_id=lot_id,
+                    slot_id=bay1.id,
+                    vehicle_number="MH-12-EV-9001",
+                    vehicle_category="EV_FOUR_WHEELER",
+                    driver_name="Siddharth Kulkarni",
+                    driver_phone="+919823001122",
+                    start_time=t_start,
+                    end_time=t_end,
+                    idempotency_key=idem_key,
+                ),
+                db=db,
+            )
+        )
+        b1_replay = _run_sync(
+            create_booking(
+                payload=BookingCreateRequest(
+                    lot_id=lot_id,
+                    slot_id=bay1.id,
+                    vehicle_number="MH-12-EV-9001",
+                    vehicle_category="EV_FOUR_WHEELER",
+                    driver_name="Siddharth Kulkarni",
+                    driver_phone="+919823001122",
+                    start_time=t_start,
+                    end_time=t_end,
+                    idempotency_key=idem_key,
+                ),
+                db=db,
+            )
+        )
+        assert b1.id == b1_replay.id
+        assert b1.booking_reference == b1_replay.booking_reference
+        assert b1.reservation_expires_at is not None
+
+        # 9. Concurrent / Overlapping Time Interval Check (Different idempotency_key -> 409 Conflict)
+        with pytest.raises(HTTPException) as overlap_exc:
+            _run_sync(
+                create_booking(
+                    payload=BookingCreateRequest(
+                        lot_id=lot_id,
+                        slot_id=bay1.id,
+                        vehicle_number="MH-14-AB-3344",
+                        vehicle_category="EV_FOUR_WHEELER",
+                        driver_name="Neha Joshi",
+                        driver_phone="+919823998877",
+                        start_time=t_start + timedelta(minutes=30),
+                        end_time=t_end + timedelta(minutes=30),
+                        idempotency_key="IDEM-PUN-BAY1-CONFLICT",
+                    ),
+                    db=db,
+                )
+            )
+        assert overlap_exc.value.status_code == 409
+
+        # 10. Time-Range Availability Reflects Reserved Bay
+        avail_after = _run_sync(
+            check_inventory_time_range_availability(
+                payload=TimeRangeAvailabilityRequest(
+                    lot_id=lot_id,
+                    start_time=t_start + timedelta(minutes=15),
+                    end_time=t_end - timedelta(minutes=15),
+                ),
+                db=db,
+            )
+        )
+        assert avail_after.available_bay_count == 1
+        assert bay1.id in avail_after.conflicting_slot_ids
+
+        # 11. Revalidate Availability During Payment Confirmation & Apply Additional Charges
+        confirmed_b1 = _run_sync(
+            verify_payment(
+                payload=PaymentVerifyRequest(
+                    booking_reference=b1.booking_reference,
+                    razorpay_order_id=b1.payment.razorpay_order_id,
+                    razorpay_payment_id="pay_phase04_verified_01",
+                ),
+                db=db,
+            )
+        )
+        assert confirmed_b1.status.value == "CONFIRMED"
+
+        charged_b1 = _run_sync(
+            apply_booking_additional_charges(
+                booking_reference=b1.booking_reference,
+                payload=AdditionalChargesRequest(
+                    overstay_minutes=45,
+                    ev_kwh_consumed=18.5,
+                    valet_cleaning_requested=True,
+                ),
+                db=db,
+            )
+        )
+        assert charged_b1.additional_charges_inr > 0
+        assert charged_b1.overstay_fee_inr > 0
+        assert charged_b1.total_amount_inr > confirmed_b1.total_amount_inr
+
+        events = _run_sync(
+            list_booking_events(booking_reference=b1.booking_reference, db=db)
+        )
+        event_types = [e.event_type for e in events]
+        assert "RESERVED_HOLD_CREATED" in event_types
+        assert "IDEMPOTENT_REPLAY" in event_types
+        assert "AVAILABILITY_REVALIDATED" in event_types
+        assert "PAYMENT_CONFIRMED" in event_types
+        assert "ADDITIONAL_CHARGES_COMPUTED" in event_types
+
+        # 12. Release Expired Reservations Automatically
+        expiring_b2 = _run_sync(
+            create_booking(
+                payload=BookingCreateRequest(
+                    lot_id=lot_id,
+                    slot_id=bay2.id,
+                    vehicle_number="MH-12-XY-7788",
+                    vehicle_category="SUV_XL",
+                    driver_name="Vikram Gokhale",
+                    driver_phone="+919822110099",
+                    start_time=t_start,
+                    end_time=t_end,
+                ),
+                db=db,
+            )
+        )
+        # Simulate hold TTL expiration in the database
+        db_b2 = (
+            db.query(Booking)
+            .filter(Booking.booking_reference == expiring_b2.booking_reference)
+            .first()
+        )
+        db_b2.reservation_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.commit()
+
+        release_res = _run_sync(trigger_release_expired_reservations(db=db))
+        assert release_res["released_count"] >= 1
+        assert expiring_b2.booking_reference in release_res["released_bookings"]
+
+        # Verify bay2 is now AVAILABLE again and can be booked by another driver
+        rebooked_b2 = _run_sync(
+            create_booking(
+                payload=BookingCreateRequest(
+                    lot_id=lot_id,
+                    slot_id=bay2.id,
+                    vehicle_number="MH-12-NEW-5566",
+                    vehicle_category="SUV_XL",
+                    driver_name="Pooja Kulkarni",
+                    driver_phone="+919855667788",
+                    start_time=t_start,
+                    end_time=t_end,
+                ),
+                db=db,
+            )
+        )
+        assert rebooked_b2.status.value == "PENDING_PAYMENT"
+    finally:
         db.close()

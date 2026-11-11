@@ -6,6 +6,7 @@ from typing import List, Optional
 from fastapi import (
     Depends,
     FastAPI,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -37,12 +38,18 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
 from app.models import (
     AuditLog,
+    AvailabilitySchedule,
     Booking,
+    BookingEvent,
     BookingStatus,
     GateLog,
+    ParkingFloor,
     ParkingLot,
+    ParkingOperator,
     ParkingSlot,
+    ParkingZone,
     Permission,
+    PricingRule,
     Role,
     RolePermission,
     SlotStatus,
@@ -51,23 +58,40 @@ from app.models import (
     UserRole,
     UserSession,
     Vehicle,
+    VehicleCategory,
 )
 from app.schemas import (
+    AdditionalChargesRequest,
     AdminRoleUpdateRequest,
     AdminStatusUpdateRequest,
     AIPricingRecommendationResponse,
+    AvailabilityScheduleResponse,
+    BayTypeAssignRequest,
     BookingCreateRequest,
+    BookingEventResponse,
     BookingExtendRequest,
     BookingResponse,
     DriverRecommendationRequest,
+    DurationAndQuoteRequest,
+    DurationAndQuoteResponse,
     EmailVerificationRequest,
     ForgotPasswordRequest,
     GateScanRequest,
     GateScanResponse,
+    LocationOpeningHoursUpdateRequest,
     LoginRequest,
+    ParkingBayCreateRequest,
+    ParkingFloorCreateRequest,
+    ParkingFloorResponse,
+    ParkingLocationCreateRequest,
     ParkingLotDetailResponse,
     ParkingLotResponse,
+    ParkingOperatorResponse,
+    ParkingZoneCreateRequest,
+    ParkingZoneResponse,
     PaymentVerifyRequest,
+    PricingRuleCreateRequest,
+    PricingRuleResponse,
     ProfileUpdateRequest,
     RegisterRequest,
     ResetPasswordRequest,
@@ -76,18 +100,25 @@ from app.schemas import (
     SlotResponse,
     SlotStatusUpdateRequest,
     SurgeUpdateRequest,
+    TimeRangeAvailabilityRequest,
+    TimeRangeAvailabilityResponse,
     TokenResponse,
     UserProfileResponse,
+    VehicleCategoryResponse,
     VehicleCreateRequest,
     VehicleItemResponse,
 )
 from app.seed import seed_initial_data
 from app.services.ai_engine import ai_engine
 from app.services.booking_service import (
+    calculate_and_apply_additional_charges,
+    calculate_duration_and_quote,
     cancel_transactional_booking,
+    check_time_range_availability,
     compute_driver_recommendations,
     create_transactional_booking,
     extend_transactional_booking,
+    release_expired_reservations,
     verify_qr_signature,
 )
 from app.services.payment_service import verify_and_capture_payment
@@ -176,6 +207,11 @@ def _serialize_lot(lot: ParkingLot, include_slots: bool = False) -> dict:
         "ev_surcharge_inr": lot.ev_surcharge_inr,
         "dynamic_pricing_enabled": lot.dynamic_pricing_enabled,
         "current_surge_multiplier": lot.current_surge_multiplier,
+        "opening_time": getattr(lot, "opening_time", "00:00") or "00:00",
+        "closing_time": getattr(lot, "closing_time", "23:59") or "23:59",
+        "is_24_hours": bool(getattr(lot, "is_24_hours", True)),
+        "grace_period_minutes": getattr(lot, "grace_period_minutes", 15) or 15,
+        "reservation_hold_minutes": getattr(lot, "reservation_hold_minutes", 15) or 15,
         "anpr_enabled": lot.anpr_enabled,
         "fastag_enabled": lot.fastag_enabled,
         "operator_name": lot.operator_name,
@@ -192,27 +228,50 @@ def _serialize_lot(lot: ParkingLot, include_slots: bool = False) -> dict:
             SlotResponse.model_validate(s).model_dump()
             for s in sorted(slots, key=lambda x: x.id)
         ]
+        data["floors"] = [
+            ParkingFloorResponse.model_validate(f).model_dump()
+            for f in sorted(lot.floors or [], key=lambda x: x.floor_number)
+        ]
+        data["zones"] = [
+            ParkingZoneResponse.model_validate(z).model_dump()
+            for z in sorted(lot.zones or [], key=lambda x: x.id)
+        ]
+        data["pricing_rules"] = [
+            PricingRuleResponse.model_validate(pr).model_dump()
+            for pr in sorted(lot.pricing_rules or [], key=lambda x: x.id)
+        ]
+        data["schedules"] = [
+            AvailabilityScheduleResponse.model_validate(sc).model_dump()
+            for sc in sorted(lot.schedules or [], key=lambda x: x.day_of_week)
+        ]
     return data
 
 
 def _serialize_booking(booking: Booking) -> BookingResponse:
     qr_payload = f"PARKWISE|{booking.booking_reference}|{booking.slot_id}|{booking.vehicle_number}|{booking.qr_signature}"
+    events_sorted = sorted(
+        booking.events or [], key=lambda e: e.created_at or datetime.now(timezone.utc)
+    )
     return BookingResponse(
         id=booking.id,
         booking_reference=booking.booking_reference,
+        idempotency_key=booking.idempotency_key,
         lot_id=booking.lot_id,
         slot_id=booking.slot_id,
         slot_number=booking.slot.slot_number if booking.slot else None,
         lot_name=booking.lot.name if booking.lot else None,
         city=booking.lot.city if booking.lot else None,
         vehicle_number=booking.vehicle_number,
+        vehicle_category=getattr(booking, "vehicle_category", "SEDAN") or "SEDAN",
         driver_name=booking.driver_name,
         driver_phone=booking.driver_phone,
         start_time=booking.start_time,
         end_time=booking.end_time,
+        reservation_expires_at=booking.reservation_expires_at,
         duration_hours=booking.duration_hours,
         base_amount_inr=booking.base_amount_inr,
         surge_multiplier=booking.surge_multiplier,
+        additional_charges_inr=getattr(booking, "additional_charges_inr", 0.0) or 0.0,
         gst_amount_inr=booking.gst_amount_inr,
         total_amount_inr=booking.total_amount_inr,
         status=booking.status,
@@ -223,6 +282,7 @@ def _serialize_booking(booking: Booking) -> BookingResponse:
         overstay_fee_inr=booking.overstay_fee_inr,
         created_at=booking.created_at,
         payment=booking.payment,
+        events=[BookingEventResponse.model_validate(ev) for ev in events_sorted],
     )
 
 
@@ -1101,6 +1161,497 @@ async def get_parking_lot_detail(lot_id: int, db: Session = Depends(get_db)):
 
 
 # ----------------------------------------------------------------------------
+# 3B. Phase 04: Parking Inventory Management & Time-Range Availability Engine
+# ----------------------------------------------------------------------------
+@app.get("/api/v1/inventory/operators", response_model=List[ParkingOperatorResponse])
+async def list_parking_operators(db: Session = Depends(get_db)):
+    operators = db.query(ParkingOperator).order_by(ParkingOperator.id.asc()).all()
+    return [ParkingOperatorResponse.model_validate(op) for op in operators]
+
+
+@app.get(
+    "/api/v1/inventory/vehicle-categories",
+    response_model=List[VehicleCategoryResponse],
+)
+async def list_vehicle_categories(db: Session = Depends(get_db)):
+    cats = db.query(VehicleCategory).order_by(VehicleCategory.id.asc()).all()
+    return [VehicleCategoryResponse.model_validate(c) for c in cats]
+
+
+@app.post(
+    "/api/v1/inventory/locations",
+    response_model=ParkingLotDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_parking_location(
+    payload: ParkingLocationCreateRequest,
+    db: Session = Depends(get_db),
+):
+    code_norm = payload.code.strip().upper()
+    existing = db.query(ParkingLot).filter(ParkingLot.code == code_norm).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Parking location code {code_norm} already exists.",
+        )
+
+    operator = db.query(ParkingOperator).first()
+    lot = ParkingLot(
+        operator_id=operator.id if operator else None,
+        code=code_norm,
+        name=payload.name.strip(),
+        city=payload.city.strip(),
+        address=payload.address.strip(),
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        total_floors=payload.total_floors,
+        base_hourly_rate_inr=payload.base_hourly_rate_inr,
+        ev_surcharge_inr=payload.ev_surcharge_inr,
+        dynamic_pricing_enabled=True,
+        current_surge_multiplier=1.0,
+        opening_time=payload.opening_time,
+        closing_time=payload.closing_time,
+        is_24_hours=payload.is_24_hours,
+        grace_period_minutes=15,
+        reservation_hold_minutes=15,
+        anpr_enabled=True,
+        fastag_enabled=True,
+        operator_name=payload.operator_name.strip(),
+        kyc_verified=True,
+        rating=4.9,
+    )
+    db.add(lot)
+    db.flush()
+
+    # Seed default floors, zones, and weekly schedules for the new location
+    for floor_num in range(1, payload.total_floors + 1):
+        fl = ParkingFloor(
+            lot_id=lot.id,
+            floor_number=floor_num,
+            floor_name=f"Level B{floor_num} — Smart Deck",
+            clearance_height_m=2.35 if floor_num == 1 else 2.20,
+            total_bays=0,
+            has_ev_chargers=True,
+        )
+        db.add(fl)
+        db.flush()
+        db.add(
+            ParkingZone(
+                lot_id=lot.id,
+                floor_id=fl.id,
+                zone_code="A",
+                zone_name=f"Level B{floor_num} Zone A (Core Deck)",
+                dedicated_category="ALL",
+                is_active=True,
+            )
+        )
+
+    for day_idx in range(7):
+        db.add(
+            AvailabilitySchedule(
+                lot_id=lot.id,
+                day_of_week=day_idx,
+                open_time=payload.opening_time,
+                close_time=payload.closing_time,
+                is_24_hours=payload.is_24_hours,
+                is_closed=False,
+                peak_start_time="09:00",
+                peak_end_time="20:00",
+            )
+        )
+
+    db.add(
+        AuditLog(
+            actor_email="operator@parkwise.in",
+            actor_role="OPERATOR",
+            action="LOCATION_CREATED",
+            target_resource=lot.code,
+            details=f"Created parking location '{lot.name}' in {lot.city} (₹{lot.base_hourly_rate_inr}/hr).",
+        )
+    )
+    db.commit()
+    db.refresh(lot)
+    return _serialize_lot(lot, include_slots=True)
+
+
+@app.post(
+    "/api/v1/inventory/locations/{lot_id}/floors",
+    response_model=ParkingFloorResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_parking_floor(
+    lot_id: int,
+    payload: ParkingFloorCreateRequest,
+    db: Session = Depends(get_db),
+):
+    lot = db.query(ParkingLot).filter(ParkingLot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Parking lot not found."
+        )
+    existing = (
+        db.query(ParkingFloor)
+        .filter(
+            ParkingFloor.lot_id == lot_id,
+            ParkingFloor.floor_number == payload.floor_number,
+        )
+        .first()
+    )
+    if existing:
+        existing.floor_name = payload.floor_name.strip()
+        existing.clearance_height_m = payload.clearance_height_m
+        existing.total_bays = payload.total_bays
+        existing.has_ev_chargers = payload.has_ev_chargers
+        db.commit()
+        db.refresh(existing)
+        return ParkingFloorResponse.model_validate(existing)
+
+    floor = ParkingFloor(
+        lot_id=lot_id,
+        floor_number=payload.floor_number,
+        floor_name=payload.floor_name.strip(),
+        clearance_height_m=payload.clearance_height_m,
+        total_bays=payload.total_bays,
+        has_ev_chargers=payload.has_ev_chargers,
+    )
+    db.add(floor)
+    if payload.floor_number > lot.total_floors:
+        lot.total_floors = payload.floor_number
+    db.commit()
+    db.refresh(floor)
+    return ParkingFloorResponse.model_validate(floor)
+
+
+@app.post(
+    "/api/v1/inventory/locations/{lot_id}/zones",
+    response_model=ParkingZoneResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_parking_zone(
+    lot_id: int,
+    payload: ParkingZoneCreateRequest,
+    db: Session = Depends(get_db),
+):
+    lot = db.query(ParkingLot).filter(ParkingLot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Parking lot not found."
+        )
+    floor = (
+        db.query(ParkingFloor)
+        .filter(
+            ParkingFloor.id == payload.floor_id,
+            ParkingFloor.lot_id == lot_id,
+        )
+        .first()
+    )
+    if not floor:
+        floor = (
+            db.query(ParkingFloor)
+            .filter(ParkingFloor.lot_id == lot_id)
+            .order_by(ParkingFloor.floor_number.asc())
+            .first()
+        )
+    if not floor:
+        floor = ParkingFloor(
+            lot_id=lot_id,
+            floor_number=1,
+            floor_name="Level B1",
+            clearance_height_m=2.3,
+        )
+        db.add(floor)
+        db.flush()
+
+    zone_code = payload.zone_code.strip().upper()
+    existing = (
+        db.query(ParkingZone)
+        .filter(
+            ParkingZone.lot_id == lot_id,
+            ParkingZone.floor_id == floor.id,
+            ParkingZone.zone_code == zone_code,
+        )
+        .first()
+    )
+    if existing:
+        existing.zone_name = payload.zone_name.strip()
+        existing.dedicated_category = payload.dedicated_category
+        db.commit()
+        db.refresh(existing)
+        return ParkingZoneResponse.model_validate(existing)
+
+    zone = ParkingZone(
+        lot_id=lot_id,
+        floor_id=floor.id,
+        zone_code=zone_code,
+        zone_name=payload.zone_name.strip(),
+        dedicated_category=payload.dedicated_category,
+        is_active=True,
+    )
+    db.add(zone)
+    db.commit()
+    db.refresh(zone)
+    return ParkingZoneResponse.model_validate(zone)
+
+
+@app.post(
+    "/api/v1/inventory/locations/{lot_id}/bays",
+    response_model=SlotResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_parking_bay(
+    lot_id: int,
+    payload: ParkingBayCreateRequest,
+    db: Session = Depends(get_db),
+):
+    lot = db.query(ParkingLot).filter(ParkingLot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Parking lot not found."
+        )
+    slot_num = payload.slot_number.strip().upper()
+    dup = (
+        db.query(ParkingSlot)
+        .filter(ParkingSlot.lot_id == lot_id, ParkingSlot.slot_number == slot_num)
+        .first()
+    )
+    if dup:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Bay {slot_num} already exists in facility {lot.code}.",
+        )
+
+    floor = (
+        db.query(ParkingFloor)
+        .filter(
+            ParkingFloor.lot_id == lot_id,
+            ParkingFloor.floor_number == payload.floor,
+        )
+        .first()
+    )
+    zone = None
+    if floor:
+        zone = (
+            db.query(ParkingZone)
+            .filter(
+                ParkingZone.lot_id == lot_id,
+                ParkingZone.floor_id == floor.id,
+                ParkingZone.zone_code == payload.zone.strip().upper(),
+            )
+            .first()
+        )
+        floor.total_bays = (floor.total_bays or 0) + 1
+        if payload.slot_type == SlotType.EV_CHARGING:
+            floor.has_ev_chargers = True
+
+    bay = ParkingSlot(
+        lot_id=lot_id,
+        floor_id=floor.id if floor else None,
+        zone_id=zone.id if zone else None,
+        slot_number=slot_num,
+        floor=payload.floor,
+        zone=payload.zone.strip().upper(),
+        slot_type=payload.slot_type,
+        vehicle_category_code=payload.vehicle_category_code,
+        status=SlotStatus.AVAILABLE,
+        sensor_health="ONLINE",
+        power_kw=payload.power_kw
+        if payload.power_kw is not None
+        else (22.0 if payload.slot_type == SlotType.EV_CHARGING else None),
+        custom_hourly_rate_inr=payload.custom_hourly_rate_inr,
+    )
+    db.add(bay)
+    db.add(
+        AuditLog(
+            actor_email="operator@parkwise.in",
+            actor_role="OPERATOR",
+            action="BAY_CREATED",
+            target_resource=f"{lot.code}:{slot_num}",
+            details=f"Created bay {slot_num} (type={payload.slot_type.value}, category={payload.vehicle_category_code}).",
+        )
+    )
+    db.commit()
+    db.refresh(bay)
+    return SlotResponse.model_validate(bay)
+
+
+@app.patch("/api/v1/inventory/bays/{slot_id}/type", response_model=SlotResponse)
+async def assign_parking_bay_type(
+    slot_id: int,
+    payload: BayTypeAssignRequest,
+    db: Session = Depends(get_db),
+):
+    slot = db.query(ParkingSlot).filter(ParkingSlot.id == slot_id).first()
+    if not slot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Parking bay not found."
+        )
+    slot.slot_type = payload.slot_type
+    slot.vehicle_category_code = payload.vehicle_category_code
+    slot.power_kw = (
+        payload.power_kw
+        if payload.power_kw is not None
+        else (22.0 if payload.slot_type == SlotType.EV_CHARGING else None)
+    )
+    if payload.custom_hourly_rate_inr is not None:
+        slot.custom_hourly_rate_inr = payload.custom_hourly_rate_inr
+
+    db.add(
+        AuditLog(
+            actor_email="operator@parkwise.in",
+            actor_role="OPERATOR",
+            action="BAY_TYPE_ASSIGNED",
+            target_resource=f"Slot #{slot.id} ({slot.slot_number})",
+            details=f"Assigned type={payload.slot_type.value}, category={payload.vehicle_category_code}.",
+        )
+    )
+    db.commit()
+    db.refresh(slot)
+    return SlotResponse.model_validate(slot)
+
+
+@app.put(
+    "/api/v1/inventory/locations/{lot_id}/schedule",
+    response_model=ParkingLotDetailResponse,
+)
+async def update_location_opening_hours(
+    lot_id: int,
+    payload: LocationOpeningHoursUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    lot = db.query(ParkingLot).filter(ParkingLot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Parking lot not found."
+        )
+    lot.opening_time = payload.opening_time
+    lot.closing_time = payload.closing_time
+    lot.is_24_hours = payload.is_24_hours
+    lot.grace_period_minutes = payload.grace_period_minutes
+    lot.reservation_hold_minutes = payload.reservation_hold_minutes
+
+    for sc in lot.schedules or []:
+        sc.open_time = payload.opening_time
+        sc.close_time = payload.closing_time
+        sc.is_24_hours = payload.is_24_hours
+        sc.peak_start_time = payload.peak_start_time
+        sc.peak_end_time = payload.peak_end_time
+
+    db.add(
+        AuditLog(
+            actor_email="operator@parkwise.in",
+            actor_role="OPERATOR",
+            action="OPENING_HOURS_UPDATED",
+            target_resource=lot.code,
+            details=f"Hours={payload.opening_time}-{payload.closing_time} (24h={payload.is_24_hours}, hold={payload.reservation_hold_minutes}m).",
+        )
+    )
+    db.commit()
+    db.refresh(lot)
+    return _serialize_lot(lot, include_slots=True)
+
+
+@app.get(
+    "/api/v1/inventory/locations/{lot_id}/pricing-rules",
+    response_model=List[PricingRuleResponse],
+)
+async def list_location_pricing_rules(lot_id: int, db: Session = Depends(get_db)):
+    rules = (
+        db.query(PricingRule)
+        .filter(PricingRule.lot_id == lot_id)
+        .order_by(PricingRule.id.asc())
+        .all()
+    )
+    return [PricingRuleResponse.model_validate(r) for r in rules]
+
+
+@app.post(
+    "/api/v1/inventory/locations/{lot_id}/pricing-rules",
+    response_model=PricingRuleResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_location_pricing_rule(
+    lot_id: int,
+    payload: PricingRuleCreateRequest,
+    db: Session = Depends(get_db),
+):
+    lot = db.query(ParkingLot).filter(ParkingLot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Parking lot not found."
+        )
+    rule = PricingRule(
+        lot_id=lot_id,
+        rule_name=payload.rule_name.strip(),
+        rule_type=payload.rule_type,
+        multiplier=payload.multiplier,
+        flat_surcharge_inr=payload.flat_surcharge_inr,
+        min_duration_hours=payload.min_duration_hours,
+        applies_to_slot_type=payload.applies_to_slot_type,
+        is_active=True,
+    )
+    db.add(rule)
+    db.add(
+        AuditLog(
+            actor_email="operator@parkwise.in",
+            actor_role="OPERATOR",
+            action="PRICING_RULE_CREATED",
+            target_resource=lot.code,
+            details=f"Rule '{rule.rule_name}' ({rule.rule_type}, {rule.multiplier}x + ₹{rule.flat_surcharge_inr}).",
+        )
+    )
+    db.commit()
+    db.refresh(rule)
+    return PricingRuleResponse.model_validate(rule)
+
+
+@app.get("/api/v1/inventory/search", response_model=List[ParkingLotResponse])
+async def search_available_parking(
+    city: Optional[str] = Query(None),
+    slot_type: Optional[SlotType] = Query(None),
+    vehicle_category: Optional[str] = Query(None),
+    max_hourly_rate_inr: Optional[float] = Query(None, gt=0),
+    min_available_bays: int = Query(1, ge=0),
+    db: Session = Depends(get_db),
+):
+    release_expired_reservations(db)
+    query = db.query(ParkingLot)
+    if city:
+        query = query.filter(ParkingLot.city.ilike(f"%{city.strip()}%"))
+    if max_hourly_rate_inr is not None:
+        query = query.filter(ParkingLot.base_hourly_rate_inr <= max_hourly_rate_inr)
+
+    lots = query.order_by(ParkingLot.id.asc()).all()
+    results = []
+    for lot in lots:
+        matching_slots = [
+            s
+            for s in (lot.slots or [])
+            if s.status == SlotStatus.AVAILABLE
+            and (slot_type is None or s.slot_type == slot_type)
+            and (
+                vehicle_category is None
+                or vehicle_category == "COMPACT"
+                or s.vehicle_category_code == vehicle_category
+                or s.slot_type in (SlotType.STANDARD, SlotType.SUV_XL, SlotType.EV_CHARGING)
+            )
+        ]
+        if len(matching_slots) >= min_available_bays:
+            results.append(_serialize_lot(lot, include_slots=False))
+    return results
+
+
+@app.post(
+    "/api/v1/inventory/check-availability",
+    response_model=TimeRangeAvailabilityResponse,
+)
+async def check_inventory_time_range_availability(
+    payload: TimeRangeAvailabilityRequest,
+    db: Session = Depends(get_db),
+):
+    return check_time_range_availability(db, payload)
+
+
+# ----------------------------------------------------------------------------
 # 4. Transactional Bookings, Cancellation, Extension & Recommendations
 # ----------------------------------------------------------------------------
 @app.post(
@@ -1110,8 +1661,12 @@ async def get_parking_lot_detail(lot_id: int, db: Session = Depends(get_db)):
 )
 async def create_booking(
     payload: BookingCreateRequest,
+    idempotency_key_header: Optional[str] = Header(None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
 ):
+    if isinstance(idempotency_key_header, str) and idempotency_key_header.strip() and not payload.idempotency_key:
+        payload.idempotency_key = idempotency_key_header.strip()[:80]
+
     driver = db.query(User).filter(User.role == UserRole.DRIVER).first()
     if not driver:
         raise HTTPException(
@@ -1130,6 +1685,67 @@ async def create_booking(
         },
     )
     return serialized
+
+
+@app.post(
+    "/api/v1/bookings/calculate-quote",
+    response_model=DurationAndQuoteResponse,
+)
+async def calculate_booking_duration_and_quote(
+    payload: DurationAndQuoteRequest,
+    db: Session = Depends(get_db),
+):
+    return calculate_duration_and_quote(db, payload)
+
+
+@app.post("/api/v1/bookings/release-expired")
+async def trigger_release_expired_reservations(db: Session = Depends(get_db)):
+    released = release_expired_reservations(db)
+    return {
+        "status": "ok",
+        "released_count": len(released),
+        "released_bookings": released,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.post(
+    "/api/v1/bookings/{booking_reference}/additional-charges",
+    response_model=BookingResponse,
+)
+async def apply_booking_additional_charges(
+    booking_reference: str,
+    payload: AdditionalChargesRequest,
+    db: Session = Depends(get_db),
+):
+    booking = calculate_and_apply_additional_charges(db, booking_reference, payload)
+    return _serialize_booking(booking)
+
+
+@app.get(
+    "/api/v1/bookings/{booking_reference}/events",
+    response_model=List[BookingEventResponse],
+)
+async def list_booking_events(
+    booking_reference: str,
+    db: Session = Depends(get_db),
+):
+    booking = (
+        db.query(Booking)
+        .filter(Booking.booking_reference == booking_reference)
+        .first()
+    )
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found."
+        )
+    events = (
+        db.query(BookingEvent)
+        .filter(BookingEvent.booking_id == booking.id)
+        .order_by(BookingEvent.created_at.asc(), BookingEvent.id.asc())
+        .all()
+    )
+    return [BookingEventResponse.model_validate(e) for e in events]
 
 
 @app.get("/api/v1/bookings", response_model=List[BookingResponse])

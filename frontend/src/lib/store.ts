@@ -13,18 +13,25 @@ import {
   AuditLogItem,
   AuthSessionItem,
   AuthUser,
+  AvailabilityScheduleItem,
   Booking,
   DriverNotification,
   DriverProfile,
   DriverVehicle,
+  DurationAndQuoteResult,
   GateLogEntry,
+  ParkingFloorItem,
   ParkingLot,
   ParkingSlot,
+  ParkingZoneItem,
+  PricingRuleItem,
   RoleDefinition,
   SlotRecommendation,
   SlotStatus,
   SlotType,
+  TimeRangeAvailabilityResult,
   UserRole,
+  VehicleCategoryItem,
   VehicleSize,
 } from "@/types";
 import {
@@ -95,13 +102,121 @@ function recalculateLotCounts(lot: RawParkingLot | ParkingLot): ParkingLot {
   const evAvail = lot.slots.filter(
     (s) => s.slot_type === "EV_CHARGING" && s.status === "AVAILABLE"
   ).length;
+  const floors: ParkingFloorItem[] = lot.floors || [
+    {
+      id: lot.id * 10 + 1,
+      lot_id: lot.id,
+      floor_number: 1,
+      floor_name: "Level B1 — Smart EV & Accessible Deck",
+      clearance_height_cm: 235,
+      total_bays: lot.slots.filter((s) => s.floor === 1).length,
+      ev_bays: lot.slots.filter(
+        (s) => s.floor === 1 && s.slot_type === "EV_CHARGING"
+      ).length,
+      accessible_bays: lot.slots.filter(
+        (s) => s.floor === 1 && s.slot_type === "ACCESSIBLE"
+      ).length,
+    },
+    {
+      id: lot.id * 10 + 2,
+      lot_id: lot.id,
+      floor_number: 2,
+      floor_name: "Level B2 — Executive Sedan & SUV XL Deck",
+      clearance_height_cm: 225,
+      total_bays: lot.slots.filter((s) => s.floor === 2).length,
+      ev_bays: lot.slots.filter(
+        (s) => s.floor === 2 && s.slot_type === "EV_CHARGING"
+      ).length,
+      accessible_bays: lot.slots.filter(
+        (s) => s.floor === 2 && s.slot_type === "ACCESSIBLE"
+      ).length,
+    },
+  ];
+  const zones: ParkingZoneItem[] = lot.zones || [
+    {
+      id: lot.id * 20 + 1,
+      lot_id: lot.id,
+      floor_id: lot.id * 10 + 1,
+      zone_code: "A",
+      zone_name: "Zone A • Fast-Charge & Priority Wing",
+      zone_type: "EV_PRIORITY",
+      surcharge_multiplier: 1.0,
+    },
+    {
+      id: lot.id * 20 + 2,
+      lot_id: lot.id,
+      floor_id: lot.id * 10 + 1,
+      zone_code: "B",
+      zone_name: "Zone B • Standard & SUV Wide Wing",
+      zone_type: "GENERAL_AND_SUV",
+      surcharge_multiplier: 1.0,
+    },
+  ];
+  const pricing_rules: PricingRuleItem[] = lot.pricing_rules || [
+    {
+      id: lot.id * 30 + 1,
+      lot_id: lot.id,
+      rule_name: "Commercial Peak Rush Tariff (09:00–20:00 IST)",
+      rule_type: "PEAK_HOUR",
+      multiplier: lot.current_surge_multiplier,
+      flat_surcharge_inr: 0,
+      min_duration_hours: 1,
+      applies_to_slot_type: "ALL",
+      is_active: true,
+    },
+    {
+      id: lot.id * 30 + 2,
+      lot_id: lot.id,
+      rule_name: "50kW CCS2 EV Hypercharger Bay Surcharge",
+      rule_type: "EV_FAST_CHARGE",
+      multiplier: 1.0,
+      flat_surcharge_inr: lot.ev_surcharge_inr,
+      min_duration_hours: 1,
+      applies_to_slot_type: "EV_CHARGING",
+      is_active: true,
+    },
+    {
+      id: lot.id * 30 + 3,
+      lot_id: lot.id,
+      rule_name: "Wide-Bay SUV XL Structural Tariff",
+      rule_type: "SUV_OVERSIZE",
+      multiplier: 1.15,
+      flat_surcharge_inr: 25,
+      min_duration_hours: 1,
+      applies_to_slot_type: "SUV_XL",
+      is_active: true,
+    },
+  ];
+  const schedules: AvailabilityScheduleItem[] =
+    lot.schedules ||
+    Array.from({ length: 7 }, (_, dayIdx) => ({
+      id: lot.id * 40 + dayIdx + 1,
+      lot_id: lot.id,
+      day_of_week: dayIdx,
+      open_time: lot.opening_time || "00:00",
+      close_time: lot.closing_time || "23:59",
+      is_24_hours: lot.is_24_hours ?? true,
+      is_closed: false,
+      peak_start_time: "09:00",
+      peak_end_time: "20:00",
+    }));
+
   return {
     ...lot,
+    opening_time: lot.opening_time || "00:00",
+    closing_time: lot.closing_time || "23:59",
+    is_24_hours: lot.is_24_hours ?? true,
+    grace_period_minutes: lot.grace_period_minutes ?? 15,
+    reservation_hold_minutes: lot.reservation_hold_minutes ?? 15,
     total_slots: total,
     available_slots: available,
     occupied_slots: occupied,
     reserved_slots: reserved,
     ev_slots_available: evAvail,
+    floors,
+    zones,
+    pricing_rules,
+    schedules,
   };
 }
 
@@ -728,6 +843,107 @@ interface ParkwiseContextValue {
     multiplier: number
   ) => Promise<void>;
   getAIForecast: (lotId: number) => AIPricingForecast;
+  createParkingLocation: (input: {
+    code: string;
+    name: string;
+    city: string;
+    address: string;
+    latitude: number;
+    longitude: number;
+    totalFloors: number;
+    baseHourlyRateInr: number;
+    evSurchargeInr: number;
+    operatorName: string;
+    is24Hours: boolean;
+    openingTime: string;
+    closingTime: string;
+  }) => Promise<ParkingLot>;
+  addParkingFloor: (
+    lotId: number,
+    input: {
+      floorNumber: number;
+      floorName: string;
+      clearanceHeightCm: number;
+    }
+  ) => Promise<ParkingFloorItem>;
+  addParkingZone: (
+    lotId: number,
+    input: {
+      floorNumber: number;
+      zoneCode: string;
+      zoneName: string;
+      zoneType: string;
+      surchargeMultiplier: number;
+    }
+  ) => Promise<ParkingZoneItem>;
+  createParkingBay: (
+    lotId: number,
+    input: {
+      slotNumber: string;
+      floor: number;
+      zone: string;
+      slotType: SlotType;
+      vehicleCategoryCode: string;
+      powerKw?: number | null;
+      customHourlyRateInr?: number | null;
+    }
+  ) => Promise<ParkingSlot>;
+  assignParkingBayType: (
+    lotId: number,
+    slotId: number,
+    slotType: SlotType,
+    vehicleCategoryCode: string,
+    powerKw?: number | null
+  ) => Promise<void>;
+  updateLocationSchedule: (
+    lotId: number,
+    input: {
+      openingTime: string;
+      closingTime: string;
+      is24Hours: boolean;
+      gracePeriodMinutes: number;
+      reservationHoldMinutes: number;
+    }
+  ) => Promise<void>;
+  addPricingRule: (
+    lotId: number,
+    input: {
+      ruleName: string;
+      ruleType: PricingRuleItem["rule_type"];
+      multiplier: number;
+      flatSurchargeInr: number;
+      minDurationHours: number;
+      appliesToSlotType: string;
+    }
+  ) => Promise<PricingRuleItem>;
+  checkTimeRangeAvailability: (input: {
+    lotId: number;
+    startTime: string;
+    endTime: string;
+    slotType?: SlotType | "ALL";
+  }) => TimeRangeAvailabilityResult;
+  calculateDurationAndQuote: (input: {
+    lotId: number;
+    slotId: number;
+    startTime: string;
+    endTime: string;
+    vehicleCategory: string;
+    includeValetService: boolean;
+    includeEvFastCharge: boolean;
+    overstayMinutes: number;
+  }) => DurationAndQuoteResult;
+  releaseExpiredReservations: () => Promise<{
+    releasedCount: number;
+    releasedReferences: string[];
+  }>;
+  applyAdditionalCharges: (
+    bookingReference: string,
+    input: {
+      overstayMinutes: number;
+      evKwhConsumed: number;
+      valetCleaningRequested: boolean;
+    }
+  ) => Promise<Booking>;
   resetDemoState: () => void;
 }
 
@@ -2124,6 +2340,579 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
     setAuditLogs([nextAudit, ...auditLogs]);
   }, [authUser, profile.email, activeRole, auditLogs]);
 
+  // --------------------------------------------------------------------------
+  // Phase 04: Parking Inventory & Transactional Booking Engine Methods
+  // --------------------------------------------------------------------------
+  const createParkingLocation = useCallback(
+    async (input: {
+      code: string;
+      name: string;
+      city: string;
+      address: string;
+      latitude: number;
+      longitude: number;
+      totalFloors: number;
+      baseHourlyRateInr: number;
+      evSurchargeInr: number;
+      operatorName: string;
+      is24Hours: boolean;
+      openingTime: string;
+      closingTime: string;
+    }): Promise<ParkingLot> => {
+      const cleanCode = input.code.trim().toUpperCase();
+      if (lots.some((l) => l.code === cleanCode)) {
+        throw new Error(`Facility code ${cleanCode} already exists.`);
+      }
+      const nextId = Math.max(...lots.map((l) => l.id)) + 1;
+      const newSlots = buildSlotsForLot(nextId).slice(0, 8);
+      const rawLot: RawParkingLot = {
+        id: nextId,
+        code: cleanCode,
+        name: input.name.trim(),
+        city: input.city.trim(),
+        address: input.address.trim(),
+        latitude: input.latitude,
+        longitude: input.longitude,
+        total_floors: input.totalFloors,
+        base_hourly_rate_inr: input.baseHourlyRateInr,
+        ev_surcharge_inr: input.evSurchargeInr,
+        dynamic_pricing_enabled: true,
+        current_surge_multiplier: 1.15,
+        opening_time: input.openingTime,
+        closing_time: input.closingTime,
+        is_24_hours: input.is24Hours,
+        grace_period_minutes: 15,
+        reservation_hold_minutes: 15,
+        anpr_enabled: true,
+        fastag_enabled: true,
+        operator_name: input.operatorName.trim(),
+        kyc_verified: true,
+        rating: 4.9,
+        slots: newSlots,
+      };
+      const fullLot = recalculateLotCounts(rawLot);
+      const nextLots = [...lots, fullLot];
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || "operator@parkwise.in",
+        actor_role: authUser?.role || "OPERATOR",
+        action: "LOCATION_CREATED",
+        target_resource: `${fullLot.code} (${fullLot.city})`,
+        details: `Created smart parking location '${fullLot.name}' with ${fullLot.total_floors} floors and ₹${fullLot.base_hourly_rate_inr}/hr base rate.`,
+        created_at: new Date().toISOString(),
+      };
+      const nextAudits = [nextAudit, ...auditLogs];
+      setLots(nextLots);
+      setAuditLogs(nextAudits);
+      persistState(nextLots, bookings, gateLogs, nextAudits);
+      return fullLot;
+    },
+    [lots, bookings, gateLogs, auditLogs, authUser, persistState]
+  );
+
+  const addParkingFloor = useCallback(
+    async (
+      lotId: number,
+      input: {
+        floorNumber: number;
+        floorName: string;
+        clearanceHeightCm: number;
+      }
+    ): Promise<ParkingFloorItem> => {
+      const createdFloor: ParkingFloorItem = {
+        id: Date.now(),
+        lot_id: lotId,
+        floor_number: input.floorNumber,
+        floor_name: input.floorName.trim(),
+        clearance_height_cm: input.clearanceHeightCm,
+        total_bays: 0,
+        ev_bays: 0,
+        accessible_bays: 0,
+      };
+      const nextLots = lots.map((l) => {
+        if (l.id !== lotId) return l;
+        const existingFloors = l.floors || [];
+        const filtered = existingFloors.filter(
+          (f) => f.floor_number !== input.floorNumber
+        );
+        return {
+          ...l,
+          total_floors: Math.max(l.total_floors, input.floorNumber),
+          floors: [...filtered, createdFloor].sort(
+            (a, b) => a.floor_number - b.floor_number
+          ),
+        };
+      });
+      setLots(nextLots);
+      persistState(nextLots, bookings, gateLogs, auditLogs);
+      return createdFloor;
+    },
+    [lots, bookings, gateLogs, auditLogs, persistState]
+  );
+
+  const addParkingZone = useCallback(
+    async (
+      lotId: number,
+      input: {
+        floorNumber: number;
+        zoneCode: string;
+        zoneName: string;
+        zoneType: string;
+        surchargeMultiplier: number;
+      }
+    ): Promise<ParkingZoneItem> => {
+      const createdZone: ParkingZoneItem = {
+        id: Date.now(),
+        lot_id: lotId,
+        floor_id: lotId * 10 + input.floorNumber,
+        zone_code: input.zoneCode.trim().toUpperCase(),
+        zone_name: input.zoneName.trim(),
+        zone_type: input.zoneType,
+        surcharge_multiplier: input.surchargeMultiplier,
+      };
+      const nextLots = lots.map((l) => {
+        if (l.id !== lotId) return l;
+        return {
+          ...l,
+          zones: [...(l.zones || []), createdZone],
+        };
+      });
+      setLots(nextLots);
+      persistState(nextLots, bookings, gateLogs, auditLogs);
+      return createdZone;
+    },
+    [lots, bookings, gateLogs, auditLogs, persistState]
+  );
+
+  const createParkingBay = useCallback(
+    async (
+      lotId: number,
+      input: {
+        slotNumber: string;
+        floor: number;
+        zone: string;
+        slotType: SlotType;
+        vehicleCategoryCode: string;
+        powerKw?: number | null;
+        customHourlyRateInr?: number | null;
+      }
+    ): Promise<ParkingSlot> => {
+      const lot = lots.find((l) => l.id === lotId);
+      if (!lot) throw new Error("Parking location not found.");
+      const cleanSlotNum = input.slotNumber.trim().toUpperCase();
+      if (lot.slots.some((s) => s.slot_number === cleanSlotNum)) {
+        throw new Error(`Bay ${cleanSlotNum} already exists in ${lot.code}.`);
+      }
+
+      const newBay: ParkingSlot = {
+        id: Date.now(),
+        lot_id: lotId,
+        slot_number: cleanSlotNum,
+        floor: input.floor,
+        zone: input.zone.trim().toUpperCase(),
+        slot_type: input.slotType,
+        vehicle_category_code: input.vehicleCategoryCode,
+        status: "AVAILABLE",
+        sensor_health: "ONLINE",
+        power_kw:
+          input.powerKw ??
+          (input.slotType === "EV_CHARGING" ? 50 : null),
+        custom_hourly_rate_inr: input.customHourlyRateInr ?? null,
+      };
+
+      const nextLots = lots.map((l) => {
+        if (l.id !== lotId) return l;
+        return recalculateLotCounts({
+          ...l,
+          slots: [...l.slots, newBay],
+        });
+      });
+
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || "operator@parkwise.in",
+        actor_role: authUser?.role || "OPERATOR",
+        action: "BAY_CREATED",
+        target_resource: `${lot.code}:${cleanSlotNum}`,
+        details: `Created bay ${cleanSlotNum} (Floor ${input.floor}, Zone ${input.zone}, Type=${input.slotType}).`,
+        created_at: new Date().toISOString(),
+      };
+      const nextAudits = [nextAudit, ...auditLogs];
+      setLots(nextLots);
+      setAuditLogs(nextAudits);
+      persistState(nextLots, bookings, gateLogs, nextAudits);
+      return newBay;
+    },
+    [lots, bookings, gateLogs, auditLogs, authUser, persistState]
+  );
+
+  const assignParkingBayType = useCallback(
+    async (
+      lotId: number,
+      slotId: number,
+      slotType: SlotType,
+      vehicleCategoryCode: string,
+      powerKw?: number | null
+    ) => {
+      const nextLots = lots.map((l) => {
+        if (l.id !== lotId) return l;
+        const updatedSlots = l.slots.map((s) =>
+          s.id === slotId
+            ? {
+                ...s,
+                slot_type: slotType,
+                vehicle_category_code: vehicleCategoryCode,
+                power_kw:
+                  powerKw ?? (slotType === "EV_CHARGING" ? 50 : null),
+              }
+            : s
+        );
+        return recalculateLotCounts({ ...l, slots: updatedSlots });
+      });
+      setLots(nextLots);
+      persistState(nextLots, bookings, gateLogs, auditLogs);
+    },
+    [lots, bookings, gateLogs, auditLogs, persistState]
+  );
+
+  const updateLocationSchedule = useCallback(
+    async (
+      lotId: number,
+      input: {
+        openingTime: string;
+        closingTime: string;
+        is24Hours: boolean;
+        gracePeriodMinutes: number;
+        reservationHoldMinutes: number;
+      }
+    ) => {
+      const nextLots = lots.map((l) => {
+        if (l.id !== lotId) return l;
+        const updatedSchedules = (l.schedules || []).map((sc) => ({
+          ...sc,
+          open_time: input.openingTime,
+          close_time: input.closingTime,
+          is_24_hours: input.is24Hours,
+        }));
+        return {
+          ...l,
+          opening_time: input.openingTime,
+          closing_time: input.closingTime,
+          is_24_hours: input.is24Hours,
+          grace_period_minutes: input.gracePeriodMinutes,
+          reservation_hold_minutes: input.reservationHoldMinutes,
+          schedules: updatedSchedules,
+        };
+      });
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || "operator@parkwise.in",
+        actor_role: authUser?.role || "OPERATOR",
+        action: "OPENING_HOURS_UPDATED",
+        target_resource: `Lot #${lotId}`,
+        details: `Updated operating hours: ${input.is24Hours ? "24/7 Operations" : `${input.openingTime}–${input.closingTime} IST`}, Hold TTL=${input.reservationHoldMinutes}m, Grace=${input.gracePeriodMinutes}m.`,
+        created_at: new Date().toISOString(),
+      };
+      const nextAudits = [nextAudit, ...auditLogs];
+      setLots(nextLots);
+      setAuditLogs(nextAudits);
+      persistState(nextLots, bookings, gateLogs, nextAudits);
+    },
+    [lots, bookings, gateLogs, auditLogs, authUser, persistState]
+  );
+
+  const addPricingRule = useCallback(
+    async (
+      lotId: number,
+      input: {
+        ruleName: string;
+        ruleType: PricingRuleItem["rule_type"];
+        multiplier: number;
+        flatSurchargeInr: number;
+        minDurationHours: number;
+        appliesToSlotType: string;
+      }
+    ): Promise<PricingRuleItem> => {
+      const rule: PricingRuleItem = {
+        id: Date.now(),
+        lot_id: lotId,
+        rule_name: input.ruleName.trim(),
+        rule_type: input.ruleType,
+        multiplier: input.multiplier,
+        flat_surcharge_inr: input.flatSurchargeInr,
+        min_duration_hours: input.minDurationHours,
+        applies_to_slot_type: input.appliesToSlotType,
+        is_active: true,
+      };
+      const nextLots = lots.map((l) => {
+        if (l.id !== lotId) return l;
+        return {
+          ...l,
+          pricing_rules: [...(l.pricing_rules || []), rule],
+        };
+      });
+      setLots(nextLots);
+      persistState(nextLots, bookings, gateLogs, auditLogs);
+      return rule;
+    },
+    [lots, bookings, gateLogs, auditLogs, persistState]
+  );
+
+  const checkTimeRangeAvailability = useCallback(
+    (input: {
+      lotId: number;
+      startTime: string;
+      endTime: string;
+      slotType?: SlotType | "ALL";
+    }): TimeRangeAvailabilityResult => {
+      const lot = lots.find((l) => l.id === input.lotId) || lots[0];
+      const startMs = new Date(input.startTime).getTime();
+      const endMs = new Date(input.endTime).getTime();
+      const durationHours = Math.max(
+        0.5,
+        Math.round(((endMs - startMs) / 3600000) * 100) / 100
+      );
+
+      const candidateSlots = lot.slots.filter(
+        (s) =>
+          s.status !== "MAINTENANCE" &&
+          (!input.slotType ||
+            input.slotType === "ALL" ||
+            s.slot_type === input.slotType)
+      );
+
+      const conflictingIds = new Set<number>();
+      for (const b of bookings) {
+        if (b.lot_id !== lot.id) continue;
+        if (!["PENDING_PAYMENT", "CONFIRMED", "ACTIVE"].includes(b.status))
+          continue;
+        const bStart = new Date(b.start_time).getTime();
+        const bEnd = new Date(b.end_time).getTime();
+        if (startMs < bEnd && endMs > bStart) {
+          conflictingIds.add(b.slot_id);
+        }
+      }
+
+      const availableBays = candidateSlots.filter(
+        (s) => !conflictingIds.has(s.id) && s.status !== "OCCUPIED"
+      );
+
+      return {
+        lot_id: lot.id,
+        lot_code: lot.code,
+        lot_name: lot.name,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        duration_hours: durationHours,
+        is_within_opening_hours: true,
+        total_matching_bays: candidateSlots.length,
+        available_bay_count: availableBays.length,
+        conflicting_bay_count:
+          candidateSlots.length - availableBays.length,
+        available_bays: availableBays,
+        conflicting_slot_ids: Array.from(conflictingIds),
+      };
+    },
+    [lots, bookings]
+  );
+
+  const calculateDurationAndQuote = useCallback(
+    (input: {
+      lotId: number;
+      slotId: number;
+      startTime: string;
+      endTime: string;
+      vehicleCategory: string;
+      includeValetService: boolean;
+      includeEvFastCharge: boolean;
+      overstayMinutes: number;
+    }): DurationAndQuoteResult => {
+      const lot = lots.find((l) => l.id === input.lotId) || lots[0];
+      const slot =
+        lot.slots.find((s) => s.id === input.slotId) || lot.slots[0];
+      const startMs = new Date(input.startTime).getTime();
+      const endMs = new Date(input.endTime).getTime();
+      const rawHours = Math.max(0.5, (endMs - startMs) / 3600000);
+      const durationHours = Math.round(rawHours * 100) / 100;
+      const billableHours = Math.max(1.0, Math.ceil(rawHours * 2) / 2);
+
+      const baseRate =
+        slot.custom_hourly_rate_inr || lot.base_hourly_rate_inr;
+      const surge = lot.dynamic_pricing_enabled
+        ? lot.current_surge_multiplier
+        : 1.0;
+
+      const appliedRules: string[] = [];
+      if (surge > 1.0) {
+        appliedRules.push(`Dynamic Demand Surge (${surge.toFixed(2)}x)`);
+      }
+
+      const baseTariff =
+        Math.round(baseRate * billableHours * surge * 100) / 100;
+
+      let evFee = 0;
+      if (slot.slot_type === "EV_CHARGING" || input.includeEvFastCharge) {
+        evFee = Math.round(lot.ev_surcharge_inr * billableHours * 100) / 100;
+        appliedRules.push(
+          `EV 50kW Hypercharge Surcharge (₹${lot.ev_surcharge_inr}/hr)`
+        );
+      }
+
+      let suvFee = 0;
+      if (
+        slot.slot_type === "SUV_XL" ||
+        input.vehicleCategory === "SUV_XL"
+      ) {
+        suvFee = Math.round(25 * billableHours * 100) / 100;
+        appliedRules.push("SUV XL Wide-Bay Structural Surcharge (₹25/hr)");
+      }
+
+      let valetFee = 0;
+      if (input.includeValetService) {
+        valetFee = 120;
+        appliedRules.push("Concierge Valet & Bay Assistance (+₹120)");
+      }
+
+      let overstayPenalty = 0;
+      const graceMins = lot.grace_period_minutes ?? 15;
+      if (input.overstayMinutes > graceMins) {
+        const overstayHrs = Math.ceil((input.overstayMinutes - graceMins) / 30) * 0.5;
+        overstayPenalty =
+          Math.round(overstayHrs * baseRate * 1.5 * 100) / 100;
+        appliedRules.push(
+          `Overstay Penalty beyond ${graceMins}m grace (1.5x tariff)`
+        );
+      }
+
+      const additionalTotal =
+        Math.round((evFee + suvFee + valetFee + overstayPenalty) * 100) / 100;
+      const subtotal = Math.round((baseTariff + additionalTotal) * 100) / 100;
+      const gst = Math.round(subtotal * 0.18 * 100) / 100;
+      const grandTotal = Math.round((subtotal + gst) * 100) / 100;
+
+      return {
+        lot_id: lot.id,
+        slot_id: slot.id,
+        slot_number: slot.slot_number,
+        duration_hours: durationHours,
+        billable_hours: billableHours,
+        base_hourly_rate_inr: baseRate,
+        surge_multiplier: surge,
+        base_tariff_inr: baseTariff,
+        ev_charging_fee_inr: evFee,
+        suv_oversize_fee_inr: suvFee,
+        valet_or_amenity_fee_inr: valetFee,
+        overstay_penalty_inr: overstayPenalty,
+        additional_charges_total_inr: additionalTotal,
+        subtotal_before_tax_inr: subtotal,
+        gst_18_pct_inr: gst,
+        grand_total_inr: grandTotal,
+        applied_pricing_rules: appliedRules,
+      };
+    },
+    [lots]
+  );
+
+  const releaseExpiredReservations = useCallback(async (): Promise<{
+    releasedCount: number;
+    releasedReferences: string[];
+  }> => {
+    const nowMs = Date.now();
+    const releasedRefs: string[] = [];
+    const releasedSlotIds = new Set<number>();
+
+    const nextBookings = bookings.map((b) => {
+      const expMs = b.reservation_expires_at
+        ? new Date(b.reservation_expires_at).getTime()
+        : 0;
+      if (
+        b.status === "PENDING_PAYMENT" &&
+        expMs > 0 &&
+        expMs < nowMs
+      ) {
+        releasedRefs.push(b.booking_reference);
+        releasedSlotIds.add(b.slot_id);
+        return { ...b, status: "CANCELLED" as const };
+      }
+      return b;
+    });
+
+    const nextLots = lots.map((l) => {
+      const updatedSlots = l.slots.map((s) =>
+        releasedSlotIds.has(s.id) && s.status === "RESERVED"
+          ? { ...s, status: "AVAILABLE" as SlotStatus }
+          : s
+      );
+      return recalculateLotCounts({ ...l, slots: updatedSlots });
+    });
+
+    if (releasedRefs.length > 0) {
+      setBookings(nextBookings);
+      setLots(nextLots);
+      persistState(nextLots, nextBookings, gateLogs, auditLogs);
+    }
+
+    return {
+      releasedCount: releasedRefs.length,
+      releasedReferences: releasedRefs,
+    };
+  }, [bookings, lots, gateLogs, auditLogs, persistState]);
+
+  const applyAdditionalCharges = useCallback(
+    async (
+      bookingReference: string,
+      input: {
+        overstayMinutes: number;
+        evKwhConsumed: number;
+        valetCleaningRequested: boolean;
+      }
+    ): Promise<Booking> => {
+      const target = bookings.find(
+        (b) => b.booking_reference === bookingReference
+      );
+      if (!target) throw new Error("Booking not found.");
+      const lot = lots.find((l) => l.id === target.lot_id) || lots[0];
+
+      const grace = lot.grace_period_minutes ?? 15;
+      let overstayFee = 0;
+      if (input.overstayMinutes > grace) {
+        const extraHours =
+          Math.ceil((input.overstayMinutes - grace) / 30) * 0.5;
+        overstayFee =
+          Math.round(extraHours * lot.base_hourly_rate_inr * 1.5 * 100) / 100;
+      }
+      const evEnergyFee = Math.round(input.evKwhConsumed * 18.0 * 100) / 100;
+      const valetFee = input.valetCleaningRequested ? 150 : 0;
+      const additionalPreTax =
+        Math.round((overstayFee + evEnergyFee + valetFee) * 100) / 100;
+      const additionalGst = Math.round(additionalPreTax * 0.18 * 100) / 100;
+
+      const updated: Booking = {
+        ...target,
+        overstay_fee_inr:
+          Math.round((target.overstay_fee_inr + overstayFee) * 100) / 100,
+        additional_charges_inr:
+          Math.round(
+            ((target.additional_charges_inr || 0) + additionalPreTax) * 100
+          ) / 100,
+        gst_amount_inr:
+          Math.round((target.gst_amount_inr + additionalGst) * 100) / 100,
+        total_amount_inr:
+          Math.round(
+            (target.total_amount_inr + additionalPreTax + additionalGst) * 100
+          ) / 100,
+      };
+
+      const nextBookings = bookings.map((b) =>
+        b.booking_reference === bookingReference ? updated : b
+      );
+      setBookings(nextBookings);
+      persistState(lots, nextBookings, gateLogs, auditLogs);
+      return updated;
+    },
+    [bookings, lots, gateLogs, auditLogs, persistState]
+  );
+
   const value = useMemo(
     () => ({
       lots,
@@ -2161,6 +2950,17 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       updateSlotStatus,
       updateLotSurge,
       getAIForecast,
+      createParkingLocation,
+      addParkingFloor,
+      addParkingZone,
+      createParkingBay,
+      assignParkingBayType,
+      updateLocationSchedule,
+      addPricingRule,
+      checkTimeRangeAvailability,
+      calculateDurationAndQuote,
+      releaseExpiredReservations,
+      applyAdditionalCharges,
       resetDemoState,
     }),
     [
@@ -2199,6 +2999,17 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       updateSlotStatus,
       updateLotSurge,
       getAIForecast,
+      createParkingLocation,
+      addParkingFloor,
+      addParkingZone,
+      createParkingBay,
+      assignParkingBayType,
+      updateLocationSchedule,
+      addPricingRule,
+      checkTimeRangeAvailability,
+      calculateDurationAndQuote,
+      releaseExpiredReservations,
+      applyAdditionalCharges,
       resetDemoState,
     ]
   );

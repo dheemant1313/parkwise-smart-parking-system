@@ -76,9 +76,131 @@ export interface ParkingSlot {
   floor: number;
   zone: string;
   slot_type: SlotType;
+  vehicle_category_code?: string;
   status: SlotStatus;
   sensor_health: string;
   power_kw?: number | null;
+  custom_hourly_rate_inr?: number | null;
+}
+
+export interface ParkingFloorItem {
+  id: number;
+  lot_id: number;
+  floor_number: number;
+  floor_name: string;
+  clearance_height_cm: number;
+  total_bays: number;
+  ev_bays: number;
+  accessible_bays: number;
+}
+
+export interface ParkingZoneItem {
+  id: number;
+  lot_id: number;
+  floor_id: number;
+  zone_code: string;
+  zone_name: string;
+  zone_type: string;
+  surcharge_multiplier: number;
+}
+
+export interface AvailabilityScheduleItem {
+  id: number;
+  lot_id: number;
+  day_of_week: number;
+  open_time: string;
+  close_time: string;
+  is_24_hours: boolean;
+  is_closed: boolean;
+  peak_start_time: string;
+  peak_end_time: string;
+}
+
+export interface PricingRuleItem {
+  id: number;
+  lot_id: number;
+  rule_name: string;
+  rule_type:
+    | "PEAK_HOUR"
+    | "WEEKEND_SURGE"
+    | "EV_FAST_CHARGE"
+    | "SUV_OVERSIZE"
+    | "EARLY_BIRD_DISCOUNT"
+    | "OVERSTAY_PENALTY";
+  multiplier: number;
+  flat_surcharge_inr: number;
+  min_duration_hours: number;
+  applies_to_slot_type: string;
+  is_active: boolean;
+}
+
+export interface ParkingOperatorItem {
+  id: number;
+  company_name: string;
+  gstin: string;
+  pan_number: string;
+  contact_email: string;
+  contact_phone: string;
+  headquarters_city: string;
+  kyc_verified: boolean;
+  revenue_share_pct: number;
+}
+
+export interface VehicleCategoryItem {
+  id: number;
+  code: string;
+  name: string;
+  max_length_cm: number;
+  max_width_cm: number;
+  max_height_cm: number;
+  rate_multiplier: number;
+  requires_ev_bay: boolean;
+}
+
+export interface BookingEventItem {
+  id: number;
+  booking_id: number;
+  booking_reference: string;
+  event_type: string;
+  previous_status?: string | null;
+  new_status?: string | null;
+  details?: string | null;
+  created_at: string;
+}
+
+export interface DurationAndQuoteResult {
+  lot_id: number;
+  slot_id: number;
+  slot_number: string;
+  duration_hours: number;
+  billable_hours: number;
+  base_hourly_rate_inr: number;
+  surge_multiplier: number;
+  base_tariff_inr: number;
+  ev_charging_fee_inr: number;
+  suv_oversize_fee_inr: number;
+  valet_or_amenity_fee_inr: number;
+  overstay_penalty_inr: number;
+  additional_charges_total_inr: number;
+  subtotal_before_tax_inr: number;
+  gst_18_pct_inr: number;
+  grand_total_inr: number;
+  applied_pricing_rules: string[];
+}
+
+export interface TimeRangeAvailabilityResult {
+  lot_id: number;
+  lot_code: string;
+  lot_name: string;
+  start_time: string;
+  end_time: string;
+  duration_hours: number;
+  is_within_opening_hours: boolean;
+  total_matching_bays: number;
+  available_bay_count: number;
+  conflicting_bay_count: number;
+  available_bays: ParkingSlot[];
+  conflicting_slot_ids: number[];
 }
 
 export interface ParkingLot {
@@ -94,6 +216,11 @@ export interface ParkingLot {
   ev_surcharge_inr: number;
   dynamic_pricing_enabled: boolean;
   current_surge_multiplier: number;
+  opening_time?: string;
+  closing_time?: string;
+  is_24_hours?: boolean;
+  grace_period_minutes?: number;
+  reservation_hold_minutes?: number;
   anpr_enabled: boolean;
   fastag_enabled: boolean;
   operator_name: string;
@@ -105,6 +232,10 @@ export interface ParkingLot {
   reserved_slots: number;
   ev_slots_available: number;
   slots: ParkingSlot[];
+  floors?: ParkingFloorItem[];
+  zones?: ParkingZoneItem[];
+  pricing_rules?: PricingRuleItem[];
+  schedules?: AvailabilityScheduleItem[];
 }
 
 export interface PaymentSummary {
@@ -120,19 +251,23 @@ export interface PaymentSummary {
 export interface Booking {
   id: number;
   booking_reference: string;
+  idempotency_key?: string | null;
   lot_id: number;
   slot_id: number;
   slot_number: string;
   lot_name: string;
   city: string;
   vehicle_number: string;
+  vehicle_category?: string;
   driver_name: string;
   driver_phone: string;
   start_time: string;
   end_time: string;
+  reservation_expires_at?: string | null;
   duration_hours: number;
   base_amount_inr: number;
   surge_multiplier: number;
+  additional_charges_inr?: number;
   gst_amount_inr: number;
   total_amount_inr: number;
   status: BookingStatus;
@@ -143,6 +278,7 @@ export interface Booking {
   overstay_fee_inr: number;
   created_at: string;
   payment: PaymentSummary;
+  events?: BookingEventItem[];
 }
 
 export interface GateLogEntry {

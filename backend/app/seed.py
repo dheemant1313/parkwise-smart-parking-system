@@ -1,17 +1,23 @@
-"""Idempotent Database Seeder with Realistic Indian Metro Smart Parking Infrastructure, RBAC Roles, Permissions & Vehicles."""
+"""Idempotent Database Seeder with Realistic Indian Metro Smart Parking Infrastructure, RBAC, and Phase 04 Inventory Hierarchy."""
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from app.auth import ROLE_PERMISSIONS_MAP, hash_password
 from app.models import (
     AuditLog,
+    AvailabilitySchedule,
     Booking,
+    BookingEvent,
     BookingStatus,
     GateLog,
+    ParkingFloor,
     ParkingLot,
+    ParkingOperator,
     ParkingSlot,
+    ParkingZone,
     Payment,
     PaymentStatus,
     Permission,
+    PricingRule,
     Role,
     RolePermission,
     SlotStatus,
@@ -19,6 +25,7 @@ from app.models import (
     User,
     UserRole,
     Vehicle,
+    VehicleCategory,
 )
 from app.services.booking_service import compute_qr_signature
 
@@ -80,6 +87,28 @@ def seed_initial_data(db: Session) -> None:
                     )
                 )
 
+    db.flush()
+
+    # 0b. Seed Vehicle Categories (Phase 04)
+    categories_data = [
+        ("TWO_WHEELER", "Two-Wheeler & Electric Scooter", 2.1, 0.9, 1.3, 0.5, "Compact two-wheeler bays"),
+        ("COMPACT", "Compact Hatchback (<4.0m)", 3.99, 1.80, 1.55, 1.0, "Sub-4m hatchbacks and compact city cars"),
+        ("SEDAN", "Executive Sedan & Mid-Crossover", 4.60, 1.84, 1.55, 1.0, "Standard executive sedans and mid-size crossovers"),
+        ("SUV_XL", "Full-Size SUV, 7-Seater & MPV", 4.95, 1.98, 1.85, 1.3, "Wide-turning 3.2m bays with 2.4m vertical clearance"),
+        ("EV_FOUR_WHEELER", "50kW CCS2 Electric Vehicle", 4.80, 1.90, 1.75, 1.25, "Dedicated EV bays equipped with 50kW DC fast chargers"),
+    ]
+    for code, name, l_m, w_m, h_m, mult, desc in categories_data:
+        db.add(
+            VehicleCategory(
+                code=code,
+                name=name,
+                max_length_m=l_m,
+                max_width_m=w_m,
+                max_height_m=h_m,
+                rate_multiplier=mult,
+                description=desc,
+            )
+        )
     db.flush()
 
     # 1. Seed Enterprise RBAC Users
@@ -160,7 +189,7 @@ def seed_initial_data(db: Session) -> None:
     db.add_all([v1, v2, v3])
     db.flush()
 
-    # 2. Seed Indian Metropolitan Smart Parking Lots
+    # 2. Seed Parking Operators & Indian Metropolitan Smart Parking Lots
     lots_data = [
         {
             "code": "DEL-CP-01",
@@ -175,6 +204,7 @@ def seed_initial_data(db: Session) -> None:
             "dynamic_pricing_enabled": True,
             "current_surge_multiplier": 1.25,
             "operator_name": "NDMC Smart Mobility Infrastructure Ltd.",
+            "gstin": "07AAACN1122K1Z4",
             "rating": 4.9,
         },
         {
@@ -190,6 +220,7 @@ def seed_initial_data(db: Session) -> None:
             "dynamic_pricing_enabled": True,
             "current_surge_multiplier": 1.35,
             "operator_name": "Western Metro Parking Corp.",
+            "gstin": "27AABCW9988M1Z1",
             "rating": 4.95,
         },
         {
@@ -205,6 +236,7 @@ def seed_initial_data(db: Session) -> None:
             "dynamic_pricing_enabled": True,
             "current_surge_multiplier": 1.15,
             "operator_name": "Namma Mobility Grid Pvt. Ltd.",
+            "gstin": "29AABCN4455L1Z8",
             "rating": 4.85,
         },
         {
@@ -220,6 +252,7 @@ def seed_initial_data(db: Session) -> None:
             "dynamic_pricing_enabled": True,
             "current_surge_multiplier": 1.20,
             "operator_name": "CyberCity Urban Transit Ops",
+            "gstin": "06AABCC7788P1Z2",
             "rating": 4.88,
         },
         {
@@ -235,34 +268,142 @@ def seed_initial_data(db: Session) -> None:
             "dynamic_pricing_enabled": False,
             "current_surge_multiplier": 1.00,
             "operator_name": "Deccan Smart Infra Solutions",
+            "gstin": "36AABCD3344Q1Z9",
             "rating": 4.82,
         },
     ]
 
     created_lots = []
-    for ldata in lots_data:
-        lot = ParkingLot(**ldata)
+    for idx_lot, ldata in enumerate(lots_data, start=1):
+        gstin = ldata.pop("gstin")
+        op_entity = ParkingOperator(
+            company_name=ldata["operator_name"],
+            gstin=gstin,
+            contact_email=f"ops{idx_lot}@parkwise.in",
+            contact_phone=f"+91-981001100{idx_lot}",
+            kyc_verified=True,
+            settlement_account=f"RZP-SETTLE-IN-00{idx_lot}",
+        )
+        db.add(op_entity)
+        db.flush()
+
+        lot = ParkingLot(
+            operator_id=op_entity.id,
+            opening_time="00:00",
+            closing_time="23:59",
+            is_24_hours=True,
+            grace_period_minutes=15,
+            reservation_hold_minutes=15,
+            **ldata,
+        )
         db.add(lot)
         db.flush()
         created_lots.append(lot)
+
+        # Seed 2 structured floors and 2 zones per floor for each lot
+        floor_map = {}
+        zone_map = {}
+        for f_num in (1, 2):
+            fl = ParkingFloor(
+                lot_id=lot.id,
+                floor_number=f_num,
+                floor_name=f"Level 0{f_num} — {'Express & EV Deck' if f_num == 1 else 'Executive & SUV Deck'}",
+                clearance_height_m=2.45 if f_num == 1 else 2.30,
+                total_bays=8,
+                has_ev_chargers=True,
+            )
+            db.add(fl)
+            db.flush()
+            floor_map[f_num] = fl
+
+            for z_code, z_name, z_cat in [
+                ("A", "Zone A (North Core & EV Totems)", "EV_AND_ACCESSIBLE"),
+                ("B", "Zone B (South Express & SUV Wing)", "STANDARD_AND_SUV"),
+            ]:
+                zn = ParkingZone(
+                    lot_id=lot.id,
+                    floor_id=fl.id,
+                    zone_code=z_code,
+                    zone_name=z_name,
+                    dedicated_category=z_cat,
+                    is_active=True,
+                )
+                db.add(zn)
+                db.flush()
+                zone_map[(f_num, z_code)] = zn
+
+        # Seed 7-day Availability Schedule
+        for dow in range(7):
+            db.add(
+                AvailabilitySchedule(
+                    lot_id=lot.id,
+                    day_of_week=dow,
+                    open_time="00:00",
+                    close_time="23:59",
+                    is_24_hours=True,
+                    is_closed=False,
+                    peak_start_time="09:00",
+                    peak_end_time="20:00",
+                )
+            )
+
+        # Seed Pricing Rules for the location
+        db.add_all(
+            [
+                PricingRule(
+                    lot_id=lot.id,
+                    rule_name="Commercial Peak Surge Policy",
+                    rule_type="PEAK_HOUR",
+                    multiplier=lot.current_surge_multiplier,
+                    flat_surcharge_inr=0.0,
+                    min_duration_hours=1.0,
+                    applies_to_slot_type="ALL",
+                    is_active=lot.dynamic_pricing_enabled,
+                ),
+                PricingRule(
+                    lot_id=lot.id,
+                    rule_name="50kW CCS2 Fast-Charge Tariff",
+                    rule_type="EV_FAST_CHARGE",
+                    multiplier=1.0,
+                    flat_surcharge_inr=lot.ev_surcharge_inr,
+                    min_duration_hours=0.5,
+                    applies_to_slot_type="EV_CHARGING",
+                    is_active=True,
+                ),
+                PricingRule(
+                    lot_id=lot.id,
+                    rule_name="SUV XL Wide-Clearance Bay Rule",
+                    rule_type="SUV_OVERSIZE",
+                    multiplier=1.0,
+                    flat_surcharge_inr=25.0,
+                    min_duration_hours=1.0,
+                    applies_to_slot_type="SUV_XL",
+                    is_active=True,
+                ),
+            ]
+        )
 
         # Create 16 structured slots per lot across 2 floors (Zone A & Zone B)
         for idx in range(1, 17):
             floor = 1 if idx <= 8 else 2
             zone = "A" if idx % 2 == 1 else "B"
-            slot_num = f"F{floor}-{zone}{idx:02d}"
+            slot_num = f"F{floor}-${zone}{idx:02d}".replace("$", "")
 
             if idx in (1, 2, 9):
                 s_type = SlotType.EV_CHARGING
+                v_cat = "EV_FOUR_WHEELER"
                 power = 50.0
             elif idx in (3, 10):
                 s_type = SlotType.ACCESSIBLE
+                v_cat = "SEDAN"
                 power = None
             elif idx in (7, 8, 15, 16):
                 s_type = SlotType.SUV_XL
+                v_cat = "SUV_XL"
                 power = None
             else:
                 s_type = SlotType.STANDARD
+                v_cat = "SEDAN"
                 power = None
 
             if idx in (4, 11):
@@ -274,10 +415,13 @@ def seed_initial_data(db: Session) -> None:
 
             slot = ParkingSlot(
                 lot_id=lot.id,
+                floor_id=floor_map[floor].id,
+                zone_id=zone_map[(floor, zone)].id,
                 slot_number=slot_num,
                 floor=floor,
                 zone=zone,
                 slot_type=s_type,
+                vehicle_category_code=v_cat,
                 status=s_status,
                 sensor_health="ONLINE" if idx != 14 else "CALIBRATING",
                 power_kw=power,
@@ -303,17 +447,21 @@ def seed_initial_data(db: Session) -> None:
         sig = compute_qr_signature(ref, sample_slot.id, "DL-08-CAF-8921")
         demo_booking = Booking(
             booking_reference=ref,
+            idempotency_key="idem_seed_pw_demo_9012",
             user_id=driver.id,
             lot_id=first_lot.id,
             slot_id=sample_slot.id,
             vehicle_number="DL-08-CAF-8921",
+            vehicle_category="EV_FOUR_WHEELER",
             driver_name="Aarav Sharma",
             driver_phone="+91-9811045210",
             start_time=now - timedelta(minutes=15),
             end_time=now + timedelta(hours=2),
+            reservation_expires_at=now + timedelta(minutes=15),
             duration_hours=2.0,
             base_amount_inr=200.0,
             surge_multiplier=1.25,
+            additional_charges_inr=0.0,
             gst_amount_inr=36.0,
             total_amount_inr=236.0,
             status=BookingStatus.CONFIRMED,
@@ -321,6 +469,27 @@ def seed_initial_data(db: Session) -> None:
         )
         db.add(demo_booking)
         db.flush()
+
+        db.add_all(
+            [
+                BookingEvent(
+                    booking_id=demo_booking.id,
+                    booking_reference=ref,
+                    event_type="RESERVED_HOLD_CREATED",
+                    previous_status=None,
+                    new_status="PENDING_PAYMENT",
+                    details="Initial 15-minute Redis + SQLAlchemy reservation hold created.",
+                ),
+                BookingEvent(
+                    booking_id=demo_booking.id,
+                    booking_reference=ref,
+                    event_type="PAYMENT_CONFIRMED",
+                    previous_status="PENDING_PAYMENT",
+                    new_status="CONFIRMED",
+                    details="Revalidated bay availability and captured Razorpay order order_pw_demo_9012.",
+                ),
+            ]
+        )
 
         demo_payment = Payment(
             booking_id=demo_booking.id,
@@ -354,7 +523,7 @@ def seed_initial_data(db: Session) -> None:
         actor_role="ADMIN",
         action="SYSTEM_BOOTSTRAPPED",
         target_resource="ALL_METRO_LOTS",
-        details="Initialized 5 Indian metro smart parking facilities, 80 IoT bays, 4 RBAC roles, and 17 granular permissions.",
+        details="Initialized 5 Indian metro facilities, 10 floors, 20 zones, 80 IoT bays, 15 pricing rules, and 5 vehicle categories.",
     )
     db.add(audit)
     db.commit()

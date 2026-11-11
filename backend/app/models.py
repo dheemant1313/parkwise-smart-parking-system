@@ -1,4 +1,4 @@
-"""Relational Database Models for Parkwise Enterprise Platform."""
+"""Relational Database Models for Parkwise Enterprise Platform (Phases 01–04)."""
 import enum
 from datetime import datetime, timezone
 from sqlalchemy import (
@@ -8,10 +8,10 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
-    Index,
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -142,7 +142,7 @@ class UserSession(Base):
     session_token_jti = Column(String(64), unique=True, index=True, nullable=False)
     ip_address = Column(String(64), default="127.0.0.1", nullable=False)
     user_agent = Column(
-        String(255), default="Parkwise-Enterprise-Client/2.4", nullable=False
+        String(255), default="Parkwise-Enterprise-Client/2.5", nullable=False
     )
     device_label = Column(
         String(120), default="Web Browser Session", nullable=False
@@ -174,10 +174,47 @@ class Vehicle(Base):
     user = relationship("User", back_populates="vehicles")
 
 
+# ----------------------------------------------------------------------------
+# Phase 04 Entities: Operators, Categories, Locations, Floors, Zones, Bays,
+#                    Schedules, Pricing Rules, Bookings & Booking Events
+# ----------------------------------------------------------------------------
+class ParkingOperator(Base):
+    __tablename__ = "parking_operators"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_name = Column(String(160), unique=True, index=True, nullable=False)
+    gstin = Column(String(32), nullable=False)
+    contact_email = Column(String(160), nullable=False)
+    contact_phone = Column(String(24), nullable=False)
+    kyc_verified = Column(Boolean, default=True, nullable=False)
+    settlement_account = Column(
+        String(64), default="RZP-SETTLE-IN-001", nullable=False
+    )
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    lots = relationship("ParkingLot", back_populates="operator_entity")
+
+
+class VehicleCategory(Base):
+    __tablename__ = "vehicle_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(32), unique=True, index=True, nullable=False)
+    name = Column(String(80), nullable=False)
+    max_length_m = Column(Float, nullable=False)
+    max_width_m = Column(Float, nullable=False)
+    max_height_m = Column(Float, nullable=False)
+    rate_multiplier = Column(Float, default=1.0, nullable=False)
+    description = Column(Text, nullable=True)
+
+
 class ParkingLot(Base):
     __tablename__ = "parking_lots"
 
     id = Column(Integer, primary_key=True, index=True)
+    operator_id = Column(
+        Integer, ForeignKey("parking_operators.id"), nullable=True, index=True
+    )
     code = Column(String(32), unique=True, index=True, nullable=False)
     name = Column(String(160), nullable=False)
     city = Column(String(80), index=True, nullable=False)
@@ -189,6 +226,11 @@ class ParkingLot(Base):
     ev_surcharge_inr = Column(Float, default=40.0, nullable=False)
     dynamic_pricing_enabled = Column(Boolean, default=True, nullable=False)
     current_surge_multiplier = Column(Float, default=1.0, nullable=False)
+    opening_time = Column(String(8), default="00:00", nullable=False)
+    closing_time = Column(String(8), default="23:59", nullable=False)
+    is_24_hours = Column(Boolean, default=True, nullable=False)
+    grace_period_minutes = Column(Integer, default=15, nullable=False)
+    reservation_hold_minutes = Column(Integer, default=15, nullable=False)
     anpr_enabled = Column(Boolean, default=True, nullable=False)
     fastag_enabled = Column(Boolean, default=True, nullable=False)
     operator_name = Column(String(140), nullable=False)
@@ -196,10 +238,65 @@ class ParkingLot(Base):
     rating = Column(Float, default=4.8, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now)
 
+    operator_entity = relationship("ParkingOperator", back_populates="lots")
+    floors = relationship(
+        "ParkingFloor", back_populates="lot", cascade="all, delete-orphan"
+    )
+    zones = relationship(
+        "ParkingZone", back_populates="lot", cascade="all, delete-orphan"
+    )
     slots = relationship(
         "ParkingSlot", back_populates="lot", cascade="all, delete-orphan"
     )
+    schedules = relationship(
+        "AvailabilitySchedule", back_populates="lot", cascade="all, delete-orphan"
+    )
+    pricing_rules = relationship(
+        "PricingRule", back_populates="lot", cascade="all, delete-orphan"
+    )
     bookings = relationship("Booking", back_populates="lot")
+
+
+class ParkingFloor(Base):
+    __tablename__ = "parking_floors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lot_id = Column(Integer, ForeignKey("parking_lots.id"), nullable=False, index=True)
+    floor_number = Column(Integer, nullable=False)
+    floor_name = Column(String(80), nullable=False)
+    clearance_height_m = Column(Float, default=2.4, nullable=False)
+    total_bays = Column(Integer, default=8, nullable=False)
+    has_ev_chargers = Column(Boolean, default=True, nullable=False)
+
+    lot = relationship("ParkingLot", back_populates="floors")
+    zones = relationship(
+        "ParkingZone", back_populates="floor_entity", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_lot_floor_number", "lot_id", "floor_number", unique=True),
+    )
+
+
+class ParkingZone(Base):
+    __tablename__ = "parking_zones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lot_id = Column(Integer, ForeignKey("parking_lots.id"), nullable=False, index=True)
+    floor_id = Column(
+        Integer, ForeignKey("parking_floors.id"), nullable=False, index=True
+    )
+    zone_code = Column(String(24), nullable=False)
+    zone_name = Column(String(100), nullable=False)
+    dedicated_category = Column(String(32), default="ALL", nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    lot = relationship("ParkingLot", back_populates="zones")
+    floor_entity = relationship("ParkingFloor", back_populates="zones")
+
+    __table_args__ = (
+        Index("ix_floor_zone_code", "floor_id", "zone_code", unique=True),
+    )
 
 
 class ParkingSlot(Base):
@@ -207,13 +304,17 @@ class ParkingSlot(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     lot_id = Column(Integer, ForeignKey("parking_lots.id"), nullable=False, index=True)
+    floor_id = Column(Integer, ForeignKey("parking_floors.id"), nullable=True, index=True)
+    zone_id = Column(Integer, ForeignKey("parking_zones.id"), nullable=True, index=True)
     slot_number = Column(String(24), nullable=False)
     floor = Column(Integer, default=1, nullable=False)
     zone = Column(String(24), default="A", nullable=False)
     slot_type = Column(Enum(SlotType), default=SlotType.STANDARD, nullable=False)
+    vehicle_category_code = Column(String(32), default="SEDAN", nullable=False)
     status = Column(Enum(SlotStatus), default=SlotStatus.AVAILABLE, nullable=False)
     sensor_health = Column(String(32), default="ONLINE", nullable=False)
     power_kw = Column(Float, nullable=True)  # For EV bays
+    custom_hourly_rate_inr = Column(Float, nullable=True)
 
     lot = relationship("ParkingLot", back_populates="slots")
     bookings = relationship("Booking", back_populates="slot")
@@ -223,22 +324,63 @@ class ParkingSlot(Base):
     )
 
 
+class AvailabilitySchedule(Base):
+    __tablename__ = "availability_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lot_id = Column(Integer, ForeignKey("parking_lots.id"), nullable=False, index=True)
+    day_of_week = Column(Integer, nullable=False)  # 0=Monday .. 6=Sunday
+    open_time = Column(String(8), default="00:00", nullable=False)
+    close_time = Column(String(8), default="23:59", nullable=False)
+    is_24_hours = Column(Boolean, default=True, nullable=False)
+    is_closed = Column(Boolean, default=False, nullable=False)
+    peak_start_time = Column(String(8), default="09:00", nullable=False)
+    peak_end_time = Column(String(8), default="20:00", nullable=False)
+
+    lot = relationship("ParkingLot", back_populates="schedules")
+
+    __table_args__ = (
+        Index("ix_lot_day_schedule", "lot_id", "day_of_week", unique=True),
+    )
+
+
+class PricingRule(Base):
+    __tablename__ = "pricing_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lot_id = Column(Integer, ForeignKey("parking_lots.id"), nullable=False, index=True)
+    rule_name = Column(String(120), nullable=False)
+    rule_type = Column(String(40), nullable=False)
+    multiplier = Column(Float, default=1.0, nullable=False)
+    flat_surcharge_inr = Column(Float, default=0.0, nullable=False)
+    min_duration_hours = Column(Float, default=0.0, nullable=False)
+    applies_to_slot_type = Column(String(32), default="ALL", nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    lot = relationship("ParkingLot", back_populates="pricing_rules")
+
+
 class Booking(Base):
     __tablename__ = "bookings"
 
     id = Column(Integer, primary_key=True, index=True)
     booking_reference = Column(String(36), unique=True, index=True, nullable=False)
+    idempotency_key = Column(String(80), unique=True, index=True, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     lot_id = Column(Integer, ForeignKey("parking_lots.id"), nullable=False, index=True)
     slot_id = Column(Integer, ForeignKey("parking_slots.id"), nullable=False, index=True)
     vehicle_number = Column(String(24), nullable=False, index=True)
+    vehicle_category = Column(String(32), default="SEDAN", nullable=False)
     driver_name = Column(String(120), nullable=False)
     driver_phone = Column(String(20), nullable=False)
     start_time = Column(DateTime(timezone=True), nullable=False, index=True)
     end_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    reservation_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     duration_hours = Column(Float, nullable=False)
     base_amount_inr = Column(Float, nullable=False)
     surge_multiplier = Column(Float, default=1.0, nullable=False)
+    additional_charges_inr = Column(Float, default=0.0, nullable=False)
     gst_amount_inr = Column(Float, nullable=False)
     total_amount_inr = Column(Float, nullable=False)
     status = Column(
@@ -254,6 +396,28 @@ class Booking(Base):
     lot = relationship("ParkingLot", back_populates="bookings")
     slot = relationship("ParkingSlot", back_populates="bookings")
     payment = relationship("Payment", back_populates="booking", uselist=False)
+    events = relationship(
+        "BookingEvent", back_populates="booking", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_booking_slot_window", "slot_id", "start_time", "end_time"),
+    )
+
+
+class BookingEvent(Base):
+    __tablename__ = "booking_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False, index=True)
+    booking_reference = Column(String(36), nullable=False, index=True)
+    event_type = Column(String(48), nullable=False)
+    previous_status = Column(String(32), nullable=True)
+    new_status = Column(String(32), nullable=True)
+    details = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    booking = relationship("Booking", back_populates="events")
 
 
 class Payment(Base):

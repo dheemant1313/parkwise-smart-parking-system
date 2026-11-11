@@ -1,4 +1,4 @@
-"""Strict Pydantic v2 Validation Schemas for Parkwise API."""
+"""Strict Pydantic v2 Validation Schemas for Parkwise API (Phases 01–04)."""
 import re
 from datetime import datetime
 from typing import List, Optional
@@ -8,6 +8,7 @@ from app.models import BookingStatus, PaymentStatus, SlotStatus, SlotType, UserR
 INDIAN_PLATE_REGEX = re.compile(
     r"^[A-Z]{2}[-\s]?[0-9]{1,2}[-\s]?[A-Z]{1,3}[-\s]?[0-9]{4}$"
 )
+TIME_HHMM_REGEX = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
 
 class VehicleItemResponse(BaseModel):
@@ -161,7 +162,7 @@ class ProfileUpdateRequest(BaseModel):
     sms_receipts: Optional[bool] = None
     whatsapp_alerts: Optional[bool] = None
     accessible_priority: Optional[bool] = None
-    role: Optional[str] = None  # Explicitly checked to block unauthorized role escalation
+    role: Optional[str] = None
 
 
 class AdminRoleUpdateRequest(BaseModel):
@@ -173,6 +174,167 @@ class AdminStatusUpdateRequest(BaseModel):
     reason: str = "Administrative status update"
 
 
+# ----------------------------------------------------------------------------
+# Phase 04 Inventory & Booking Engine Schemas
+# ----------------------------------------------------------------------------
+class ParkingOperatorResponse(BaseModel):
+    id: int
+    company_name: str
+    gstin: str
+    contact_email: str
+    contact_phone: str
+    kyc_verified: bool
+    settlement_account: str
+
+    model_config = {"from_attributes": True}
+
+
+class VehicleCategoryResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    max_length_m: float
+    max_width_m: float
+    max_height_m: float
+    rate_multiplier: float
+    description: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ParkingFloorCreateRequest(BaseModel):
+    floor_number: int = Field(..., ge=-5, le=20)
+    floor_name: str = Field(..., min_length=2, max_length=80)
+    clearance_height_m: float = Field(2.4, ge=1.8, le=5.0)
+    total_bays: int = Field(8, ge=1, le=200)
+    has_ev_chargers: bool = True
+
+
+class ParkingFloorResponse(BaseModel):
+    id: int
+    lot_id: int
+    floor_number: int
+    floor_name: str
+    clearance_height_m: float
+    total_bays: int
+    has_ev_chargers: bool
+
+    model_config = {"from_attributes": True}
+
+
+class ParkingZoneCreateRequest(BaseModel):
+    floor_id: int = Field(..., gt=0)
+    zone_code: str = Field(..., min_length=1, max_length=24)
+    zone_name: str = Field(..., min_length=2, max_length=100)
+    dedicated_category: str = Field("ALL", max_length=32)
+
+
+class ParkingZoneResponse(BaseModel):
+    id: int
+    lot_id: int
+    floor_id: int
+    zone_code: str
+    zone_name: str
+    dedicated_category: str
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class ParkingBayCreateRequest(BaseModel):
+    slot_number: str = Field(..., min_length=2, max_length=24)
+    floor: int = Field(1, ge=-5, le=20)
+    zone: str = Field("A", min_length=1, max_length=24)
+    slot_type: SlotType = SlotType.STANDARD
+    vehicle_category_code: str = Field(
+        "SEDAN", pattern="^(TWO_WHEELER|COMPACT|SEDAN|SUV_XL|EV_FOUR_WHEELER)$"
+    )
+    power_kw: Optional[float] = None
+    custom_hourly_rate_inr: Optional[float] = Field(None, ge=10, le=2000)
+
+
+class BayTypeAssignRequest(BaseModel):
+    slot_type: SlotType
+    vehicle_category_code: str = Field(
+        "SEDAN", pattern="^(TWO_WHEELER|COMPACT|SEDAN|SUV_XL|EV_FOUR_WHEELER)$"
+    )
+    power_kw: Optional[float] = None
+    custom_hourly_rate_inr: Optional[float] = Field(None, ge=10, le=2000)
+
+
+class AvailabilityScheduleResponse(BaseModel):
+    id: int
+    lot_id: int
+    day_of_week: int
+    open_time: str
+    close_time: str
+    is_24_hours: bool
+    is_closed: bool
+    peak_start_time: str
+    peak_end_time: str
+
+    model_config = {"from_attributes": True}
+
+
+class LocationOpeningHoursUpdateRequest(BaseModel):
+    opening_time: str = Field("06:00", max_length=8)
+    closing_time: str = Field("23:59", max_length=8)
+    is_24_hours: bool = False
+    grace_period_minutes: int = Field(15, ge=0, le=60)
+    reservation_hold_minutes: int = Field(15, ge=5, le=60)
+    peak_start_time: str = Field("09:00", max_length=8)
+    peak_end_time: str = Field("20:00", max_length=8)
+
+    @field_validator("opening_time", "closing_time", "peak_start_time", "peak_end_time")
+    @classmethod
+    def validate_hhmm(cls, v: str) -> str:
+        if not TIME_HHMM_REGEX.match(v.strip()):
+            raise ValueError("Time must be in HH:MM 24-hour format (e.g. 06:00 or 23:30).")
+        return v.strip()
+
+
+class PricingRuleCreateRequest(BaseModel):
+    rule_name: str = Field(..., min_length=3, max_length=120)
+    rule_type: str = Field(
+        ...,
+        pattern="^(PEAK_HOUR|WEEKEND_SURGE|EV_FAST_CHARGE|SUV_OVERSIZE|EARLY_BIRD_DISCOUNT|OVERSTAY_PENALTY)$",
+    )
+    multiplier: float = Field(1.0, ge=0.5, le=3.5)
+    flat_surcharge_inr: float = Field(0.0, ge=0.0, le=2000.0)
+    min_duration_hours: float = Field(0.0, ge=0.0, le=24.0)
+    applies_to_slot_type: str = Field("ALL", max_length=32)
+
+
+class PricingRuleResponse(BaseModel):
+    id: int
+    lot_id: int
+    rule_name: str
+    rule_type: str
+    multiplier: float
+    flat_surcharge_inr: float
+    min_duration_hours: float
+    applies_to_slot_type: str
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class ParkingLocationCreateRequest(BaseModel):
+    code: str = Field(..., min_length=3, max_length=32)
+    name: str = Field(..., min_length=3, max_length=160)
+    city: str = Field(..., min_length=2, max_length=80)
+    address: str = Field(..., min_length=5, max_length=255)
+    latitude: float = Field(..., ge=-90.0, le=90.0)
+    longitude: float = Field(..., ge=-180.0, le=180.0)
+    total_floors: int = Field(2, ge=1, le=15)
+    base_hourly_rate_inr: float = Field(80.0, ge=10.0, le=1000.0)
+    ev_surcharge_inr: float = Field(45.0, ge=0.0, le=500.0)
+    operator_name: str = Field("Parkwise Metro Partner Pvt. Ltd.", max_length=140)
+    is_24_hours: bool = True
+    opening_time: str = "00:00"
+    closing_time: str = "23:59"
+
+
 class SlotResponse(BaseModel):
     id: int
     lot_id: int
@@ -180,9 +342,11 @@ class SlotResponse(BaseModel):
     floor: int
     zone: str
     slot_type: SlotType
+    vehicle_category_code: str = "SEDAN"
     status: SlotStatus
     sensor_health: str
     power_kw: Optional[float] = None
+    custom_hourly_rate_inr: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -200,6 +364,11 @@ class ParkingLotResponse(BaseModel):
     ev_surcharge_inr: float
     dynamic_pricing_enabled: bool
     current_surge_multiplier: float
+    opening_time: str = "00:00"
+    closing_time: str = "23:59"
+    is_24_hours: bool = True
+    grace_period_minutes: int = 15
+    reservation_hold_minutes: int = 15
     anpr_enabled: bool
     fastag_enabled: bool
     operator_name: str
@@ -216,16 +385,105 @@ class ParkingLotResponse(BaseModel):
 
 class ParkingLotDetailResponse(ParkingLotResponse):
     slots: List[SlotResponse] = []
+    floors: List[ParkingFloorResponse] = []
+    zones: List[ParkingZoneResponse] = []
+    pricing_rules: List[PricingRuleResponse] = []
+    schedules: List[AvailabilityScheduleResponse] = []
+
+
+class TimeRangeAvailabilityRequest(BaseModel):
+    lot_id: int = Field(..., gt=0)
+    start_time: datetime
+    end_time: datetime
+    slot_type: Optional[SlotType] = None
+    vehicle_category: Optional[str] = None
+
+    @field_validator("end_time")
+    @classmethod
+    def validate_range(cls, end_time: datetime, info) -> datetime:
+        start_time = info.data.get("start_time")
+        if start_time and end_time <= start_time:
+            raise ValueError("end_time must be strictly after start_time")
+        return end_time
+
+
+class TimeRangeAvailabilityResponse(BaseModel):
+    lot_id: int
+    lot_code: str
+    lot_name: str
+    start_time: datetime
+    end_time: datetime
+    duration_hours: float
+    is_within_opening_hours: bool
+    total_matching_bays: int
+    available_bay_count: int
+    conflicting_bay_count: int
+    available_bays: List[SlotResponse]
+    conflicting_slot_ids: List[int]
+
+
+class DurationAndQuoteRequest(BaseModel):
+    lot_id: int = Field(..., gt=0)
+    slot_id: int = Field(..., gt=0)
+    start_time: datetime
+    end_time: datetime
+    vehicle_category: str = Field("SEDAN")
+    include_valet_service: bool = False
+    include_ev_fast_charge: bool = False
+    overstay_minutes: int = Field(0, ge=0, le=1440)
+
+
+class DurationAndQuoteResponse(BaseModel):
+    lot_id: int
+    slot_id: int
+    slot_number: str
+    duration_hours: float
+    billable_hours: float
+    base_hourly_rate_inr: float
+    surge_multiplier: float
+    base_tariff_inr: float
+    ev_charging_fee_inr: float
+    suv_oversize_fee_inr: float
+    valet_or_amenity_fee_inr: float
+    overstay_penalty_inr: float
+    additional_charges_total_inr: float
+    subtotal_before_tax_inr: float
+    gst_18_pct_inr: float
+    grand_total_inr: float
+    applied_pricing_rules: List[str]
+
+
+class AdditionalChargesRequest(BaseModel):
+    actual_checkout_time: Optional[datetime] = None
+    overstay_minutes: int = Field(0, ge=0, le=1440)
+    ev_kwh_consumed: float = Field(0.0, ge=0.0, le=200.0)
+    valet_cleaning_requested: bool = False
+    lost_ticket_or_override_fee: bool = False
+
+
+class BookingEventResponse(BaseModel):
+    id: int
+    booking_id: int
+    booking_reference: str
+    event_type: str
+    previous_status: Optional[str] = None
+    new_status: Optional[str] = None
+    details: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class BookingCreateRequest(BaseModel):
     lot_id: int = Field(..., gt=0)
     slot_id: int = Field(..., gt=0)
     vehicle_number: str = Field(..., min_length=6, max_length=20)
+    vehicle_category: str = Field("SEDAN")
     driver_name: str = Field(..., min_length=2, max_length=120)
     driver_phone: str = Field(..., min_length=10, max_length=16)
     start_time: datetime
     end_time: datetime
+    idempotency_key: Optional[str] = Field(None, min_length=4, max_length=80)
 
     @field_validator("vehicle_number")
     @classmethod
@@ -290,19 +548,23 @@ class PaymentSummary(BaseModel):
 class BookingResponse(BaseModel):
     id: int
     booking_reference: str
+    idempotency_key: Optional[str] = None
     lot_id: int
     slot_id: int
     slot_number: Optional[str] = None
     lot_name: Optional[str] = None
     city: Optional[str] = None
     vehicle_number: str
+    vehicle_category: str = "SEDAN"
     driver_name: str
     driver_phone: str
     start_time: datetime
     end_time: datetime
+    reservation_expires_at: Optional[datetime] = None
     duration_hours: float
     base_amount_inr: float
     surge_multiplier: float
+    additional_charges_inr: float = 0.0
     gst_amount_inr: float
     total_amount_inr: float
     status: BookingStatus
@@ -313,6 +575,7 @@ class BookingResponse(BaseModel):
     overstay_fee_inr: float = 0.0
     created_at: datetime
     payment: Optional[PaymentSummary] = None
+    events: List[BookingEventResponse] = []
 
     model_config = {"from_attributes": True}
 
