@@ -22,15 +22,34 @@ export function formatINRPrecise(amount: number): string {
   }).format(amount);
 }
 
+const MONTHS_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  // Deterministic IST (UTC+05:30) formatting to prevent SSR/Client hydration mismatch
+  const istMs = d.getTime() + (5 * 60 + 30) * 60 * 1000;
+  const ist = new Date(istMs);
+  const day = String(ist.getUTCDate()).padStart(2, "0");
+  const month = MONTHS_SHORT[ist.getUTCMonth()];
+  const hours24 = ist.getUTCHours();
+  const mins = String(ist.getUTCMinutes()).padStart(2, "0");
+  const period = hours24 >= 12 ? "PM" : "AM";
+  const hours12 = String(hours24 % 12 || 12).padStart(2, "0");
+  return `${day} ${month}, ${hours12}:${mins} ${period}`;
 }
 
 export const INDIAN_PLATE_REGEX =

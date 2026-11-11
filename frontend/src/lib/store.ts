@@ -261,6 +261,8 @@ const DEMO_SIG = generateDeterministicSignature(
   "DL-08-CAF-8921"
 );
 
+const ANCHOR_MS = Date.UTC(2026, 10, 11, 10, 0, 0);
+
 const INITIAL_BOOKINGS: Booking[] = [
   {
     id: 1,
@@ -273,8 +275,8 @@ const INITIAL_BOOKINGS: Booking[] = [
     vehicle_number: "DL-08-CAF-8921",
     driver_name: "Aarav Sharma",
     driver_phone: "+91-9811045210",
-    start_time: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-    end_time: new Date(Date.now() + 105 * 60 * 1000).toISOString(),
+    start_time: new Date(ANCHOR_MS - 15 * 60 * 1000).toISOString(),
+    end_time: new Date(ANCHOR_MS + 105 * 60 * 1000).toISOString(),
     duration_hours: 2,
     base_amount_inr: 312.5,
     surge_multiplier: 1.25,
@@ -286,7 +288,7 @@ const INITIAL_BOOKINGS: Booking[] = [
     checked_in_at: null,
     checked_out_at: null,
     overstay_fee_inr: 0,
-    created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+    created_at: new Date(ANCHOR_MS - 20 * 60 * 1000).toISOString(),
     payment: {
       razorpay_order_id: "order_pw_demo_9012",
       razorpay_payment_id: "pay_pw_demo_9012",
@@ -306,7 +308,7 @@ const INITIAL_NOTIFICATIONS: DriverNotification[] = [
     message:
       "Bay F1-A01 (EV 50kW Fast-Charge) at Connaught Place is locked for DL-08-CAF-8921.",
     category: "BOOKING",
-    timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+    timestamp: new Date(ANCHOR_MS - 15 * 60 * 1000).toISOString(),
     read: false,
     bookingReference: "PW-DEMO-9012",
   },
@@ -316,7 +318,7 @@ const INITIAL_NOTIFICATIONS: DriverNotification[] = [
     message:
       "Your primary vehicle DL-08-CAF-8921 is pre-authorized for zero-stop boom-barrier entry.",
     category: "GATE",
-    timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    timestamp: new Date(ANCHOR_MS - 60 * 60 * 1000).toISOString(),
     read: true,
   },
 ];
@@ -333,7 +335,7 @@ const INITIAL_GATE_LOGS: GateLogEntry[] = [
     verification_method: "QR_HMAC + ANPR",
     barrier_action: "STANDBY",
     notes: "Pre-authorized reservation ready for optical ANPR or QR scan at Connaught Place.",
-    timestamp: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
+    timestamp: new Date(ANCHOR_MS - 12 * 60 * 1000).toISOString(),
   },
 ];
 
@@ -345,7 +347,7 @@ const INITIAL_AUDIT_LOGS: AuditLogItem[] = [
     action: "NATIONAL_GRID_ONLINE",
     target_resource: "5 Metro Clusters (80 IoT Bays)",
     details: "Initialized XGBoost dynamic pricing model and NPCI FASTag / Razorpay HMAC verification pipeline.",
-    created_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+    created_at: new Date(ANCHOR_MS - 45 * 60 * 1000).toISOString(),
   },
   {
     id: 2,
@@ -354,7 +356,7 @@ const INITIAL_AUDIT_LOGS: AuditLogItem[] = [
     action: "SURGE_POLICY_ENABLED",
     target_resource: "MUM-BKC-02 (Jio World Drive)",
     details: "Activated dynamic surge multiplier at 1.35x due to commercial peak inflow.",
-    created_at: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+    created_at: new Date(ANCHOR_MS - 25 * 60 * 1000).toISOString(),
   },
 ];
 
@@ -646,9 +648,9 @@ const INITIAL_SESSIONS: AuthSessionItem[] = [
     user_agent: "Parkwise-Enterprise-Web/2.5 (HttpOnly Cookie + JWT)",
     device_label: "Primary Workstation • Chrome Windows",
     is_revoked: false,
-    created_at: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
-    expires_at: new Date(Date.now() + 23 * 3600 * 1000).toISOString(),
-    last_active_at: new Date().toISOString(),
+    created_at: new Date(ANCHOR_MS - 25 * 60 * 1000).toISOString(),
+    expires_at: new Date(ANCHOR_MS + 23 * 3600 * 1000).toISOString(),
+    last_active_at: new Date(ANCHOR_MS).toISOString(),
   },
   {
     id: 2,
@@ -657,9 +659,9 @@ const INITIAL_SESSIONS: AuthSessionItem[] = [
     user_agent: "Parkwise-iOS-App/2.5 (iPhone 16 Pro)",
     device_label: "iPhone 16 Pro • FASTag Companion",
     is_revoked: false,
-    created_at: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
-    expires_at: new Date(Date.now() + 20 * 3600 * 1000).toISOString(),
-    last_active_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+    created_at: new Date(ANCHOR_MS - 4 * 3600 * 1000).toISOString(),
+    expires_at: new Date(ANCHOR_MS + 20 * 3600 * 1000).toISOString(),
+    last_active_at: new Date(ANCHOR_MS - 45 * 60 * 1000).toISOString(),
   },
 ];
 
