@@ -173,6 +173,16 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        try:
+            _ = db.query(FacilityStaff).count()
+            _ = db.query(ParkingLot).first()
+            if db.query(FacilityStaff).count() == 0:
+                Base.metadata.drop_all(bind=engine)
+                Base.metadata.create_all(bind=engine)
+        except Exception:
+            db.rollback()
+            Base.metadata.drop_all(bind=engine)
+            Base.metadata.create_all(bind=engine)
         seed_initial_data(db)
     finally:
         db.close()

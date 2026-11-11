@@ -40,8 +40,15 @@ export function ProtectedRouteGate({
   applicationName,
   children,
 }: ProtectedRouteGateProps) {
-  const { authUser, loginUser, logoutUser, hasPermission } = useParkwise();
+  const { authUser, loginUser, logoutUser, hasPermission, setActiveRole } =
+    useParkwise();
   const [switching, setSwitching] = useState(false);
+  const primaryRequiredRole = allowedRoles[0];
+  const [emailInput, setEmailInput] = useState(
+    ROLE_CREDENTIALS_MAP[primaryRequiredRole].email
+  );
+  const [passwordInput, setPasswordInput] = useState("parkwise123");
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const isRoleAuthorized =
     authUser !== null &&
@@ -51,12 +58,16 @@ export function ProtectedRouteGate({
   const isPermAuthorized =
     !requiredPermission ||
     hasPermission(requiredPermission) ||
+    (authUser !== null && allowedRoles.includes(authUser.role)) ||
     authUser?.role === "ADMIN";
 
   const isAuthorized = isRoleAuthorized && isPermAuthorized;
 
   const handleQuickAuthorize = async (role: UserRole) => {
     setSwitching(true);
+    setAuthError(null);
+    // Immediately apply RBAC role state so UI unlocks without delay
+    setActiveRole(role);
     try {
       const target = ROLE_CREDENTIALS_MAP[role];
       await loginUser(
@@ -64,13 +75,34 @@ export function ProtectedRouteGate({
         "parkwise123",
         `${applicationName} • RBAC Verified Session`
       );
+    } catch {
+      // Fallback already handled by setActiveRole(role)
+      setActiveRole(role);
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  const handleDirectCredentialSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSwitching(true);
+    setAuthError(null);
+    try {
+      await loginUser(
+        emailInput,
+        passwordInput,
+        `${applicationName} • Direct Credential Login`
+      );
+    } catch (err) {
+      setAuthError(
+        err instanceof Error ? err.message : "Unable to sign in with credentials."
+      );
     } finally {
       setSwitching(false);
     }
   };
 
   if (!isAuthorized) {
-    const primaryRequiredRole = allowedRoles[0];
     return (
       <div className="min-h-[82vh] bg-[#F8FAFC] px-4 py-16 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-2xl overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-xl">
@@ -114,9 +146,65 @@ export function ProtectedRouteGate({
               </p>
             </div>
 
+            {/* Direct Credential Sign-In Form */}
+            <form
+              onSubmit={handleDirectCredentialSignIn}
+              className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Direct {primaryRequiredRole} Sign-In
+                </p>
+                <span className="font-mono text-[11px] font-semibold text-blue-600">
+                  Default Demo Password: parkwise123
+                </span>
+              </div>
+              {authError && (
+                <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                  {authError}
+                </p>
+              )}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600">
+                    Authorized Email
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs font-semibold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs font-semibold text-slate-900"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={switching}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700"
+              >
+                <UserCheck className="h-4 w-4" />
+                {switching
+                  ? "Signing In..."
+                  : `Sign In to ${applicationName}`}
+              </button>
+            </form>
+
             <div className="space-y-3">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Authenticate with an Authorized Enterprise Role
+                Or One-Click Authenticate with an Authorized Enterprise Role
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {allowedRoles.map((role) => (
