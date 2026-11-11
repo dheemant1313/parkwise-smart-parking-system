@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  ArrowUp,
   BatteryCharging,
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Clock,
   ExternalLink,
@@ -306,7 +308,7 @@ function processOfflineQuery(
 
 export function AIBookingAssistant({ onApplySlot }: AIBookingAssistantProps) {
   const { lots } = useParkwise();
-  const [isOpen, setIsOpen] = useState<boolean>(false);
+  const [isOpen, setIsOpen] = useState<boolean>(true);
   const [query, setQuery] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [lastResponse, setLastResponse] =
@@ -319,6 +321,29 @@ export function AIBookingAssistant({ onApplySlot }: AIBookingAssistantProps) {
       timestamp: string;
     }[]
   >([]);
+
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+  const [showScrollBottom, setShowScrollBottom] = useState<boolean>(false);
+  const [showScrollTop, setShowScrollTop] = useState<boolean>(false);
+
+  // Auto-scroll inside chat container whenever chatHistory or loading changes
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [chatHistory, loading]);
+
+  const handleContainerScroll = () => {
+    if (!chatContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 60;
+    setShowScrollBottom(!isNearBottom);
+    setShowScrollTop(scrollTop > 60);
+  };
 
   async function handleSendQuery(userText?: string) {
     const textToSend = (userText || query).trim();
@@ -436,6 +461,14 @@ export function AIBookingAssistant({ onApplySlot }: AIBookingAssistantProps) {
         ? params.start_time.slice(0, 16)
         : undefined,
     });
+
+    if (typeof window !== "undefined") {
+      setTimeout(() => {
+        document
+          .getElementById("booking-reservation-form")
+          ?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    }
   }
 
   return (
@@ -516,160 +549,200 @@ export function AIBookingAssistant({ onApplySlot }: AIBookingAssistantProps) {
       {/* Collapsible Chat Body */}
       {isOpen && (
         <div className="space-y-4 pt-2">
-          {/* Chat Messages */}
-          <div className="max-h-[380px] overflow-y-auto space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-            {chatHistory.length === 0 ? (
-              <div className="text-center py-6 space-y-2">
-                <Sparkles className="mx-auto h-7 w-7 text-brand-500 animate-pulse" />
-                <p className="text-xs font-bold text-slate-700">
-                  Ask anything in English or Hindi
-                </p>
-                <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
-                  e.g., &quot;Need EV parking near Cyber City tomorrow for 3
-                  hours&quot; or &quot;मुझे कल साइबर हब में 2 घंटे के लिए ईवी स्लॉट
-                  चाहिए&quot;
-                </p>
-              </div>
-            ) : (
-              chatHistory.map((item, idx) => (
-                <div
-                  key={idx}
-                  className={`flex flex-col ${
-                    item.sender === "user" ? "items-end" : "items-start"
-                  }`}
-                >
+          {/* Chat Messages Container with Active Smooth Scrolling */}
+          <div className="relative">
+            <div
+              ref={chatContainerRef}
+              onScroll={handleContainerScroll}
+              className="h-[460px] max-h-[65vh] overflow-y-auto space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-inner custom-scrollbar"
+            >
+              {chatHistory.length === 0 ? (
+                <div className="text-center py-6 space-y-2">
+                  <Sparkles className="mx-auto h-7 w-7 text-brand-500 animate-pulse" />
+                  <p className="text-xs font-bold text-slate-700">
+                    Ask anything in English or Hindi
+                  </p>
+                  <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                    e.g., &quot;Need EV parking near Cyber City tomorrow for 3
+                    hours&quot; or &quot;मुझे कल साइबर हब में 2 घंटे के लिए ईवी स्लॉट
+                    चाहिए&quot;
+                  </p>
+                </div>
+              ) : (
+                chatHistory.map((item, idx) => (
                   <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-xs ${
-                      item.sender === "user"
-                        ? "bg-brand-600 text-white font-medium"
-                        : "bg-white text-slate-800 border border-slate-200 shadow-2xs space-y-2"
+                    key={idx}
+                    className={`flex flex-col ${
+                      item.sender === "user" ? "items-end" : "items-start"
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-1 text-[10px] text-slate-400">
-                      <span className="font-bold">
-                        {item.sender === "user"
-                          ? "You"
-                          : "Parkwise AI Assistant"}
-                      </span>
-                      <span>{item.timestamp}</span>
-                    </div>
+                    <div
+                      className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-xs ${
+                        item.sender === "user"
+                          ? "bg-brand-600 text-white font-medium"
+                          : "bg-white text-slate-800 border border-slate-200 shadow-2xs space-y-2"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-1 text-[10px] text-slate-400">
+                        <span className="font-bold">
+                          {item.sender === "user"
+                            ? "You"
+                            : "Parkwise AI Assistant"}
+                        </span>
+                        <span>{item.timestamp}</span>
+                      </div>
 
-                    <p className="whitespace-pre-wrap leading-relaxed">
-                      {item.text}
-                    </p>
+                      <p className="whitespace-pre-wrap leading-relaxed">
+                        {item.text}
+                      </p>
 
-                    {item.response && (
-                      <div className="space-y-2.5 pt-2">
-                        {/* Extracted Entities Chips */}
-                        {item.response.extracted_entities && (
-                          <div className="rounded-xl bg-slate-50 p-2 space-y-1">
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                              Parsed Entities (
-                              {item.response.detected_language === "hi"
-                                ? "हिंदी Devanagari"
-                                : "English"}
-                              )
-                            </span>
-                            <div className="flex flex-wrap gap-1.5 text-[10px]">
-                              {Object.entries(item.response.extracted_entities)
-                                .filter(
-                                  ([, val]) =>
-                                    val !== null && val !== undefined
+                      {item.response && (
+                        <div className="space-y-2.5 pt-2">
+                          {/* Extracted Entities Chips */}
+                          {item.response.extracted_entities && (
+                            <div className="rounded-xl bg-slate-50 p-2 space-y-1">
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                                Parsed Entities (
+                                {item.response.detected_language === "hi"
+                                  ? "हिंदी Devanagari"
+                                  : "English"}
                                 )
-                                .map(([k, v]) => (
-                                  <span
-                                    key={k}
-                                    className="rounded-md bg-white border border-slate-200 px-1.5 py-0.5 font-medium text-slate-700"
-                                  >
-                                    <strong className="text-slate-500">
-                                      {k.replace("_", " ")}:
-                                    </strong>{" "}
-                                    {String(v)}
-                                  </span>
-                                ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Validated Slot Recommendations */}
-                        {item.response.validated_options &&
-                          item.response.validated_options.length > 0 && (
-                            <div className="space-y-1.5 pt-1">
-                              <span className="text-[10px] font-bold text-slate-700">
-                                Validated Database Matches (
-                                {item.response.validated_options.length})
                               </span>
-                              <div className="space-y-1.5">
-                                {item.response.validated_options.map((opt) => (
-                                  <div
-                                    key={opt.slot_id}
-                                    className="flex items-center justify-between gap-2 rounded-xl border border-brand-200 bg-brand-50/40 p-2 text-xs"
-                                  >
-                                    <div>
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="font-mono font-black text-brand-700">
-                                          Bay {opt.slot_number}
-                                        </span>
-                                        <span className="text-slate-500">•</span>
-                                        <span className="text-[11px] font-bold text-slate-800">
-                                          {opt.lot_name}
-                                        </span>
-                                        {opt.slot_type === "EV_CHARGING" && (
-                                          <span className="rounded bg-emerald-100 px-1 text-[9px] font-extrabold text-emerald-800">
-                                            EV 50kW
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="flex items-center gap-2 text-[10px] text-slate-500">
-                                        <span>Floor {opt.floor}</span>
-                                        <span>•</span>
-                                        <span>
-                                          {Math.round(opt.distance_km * 1000)}m
-                                          to gate
-                                        </span>
-                                        <span>•</span>
-                                        <span className="font-mono font-bold text-slate-800">
-                                          ₹{opt.estimated_total_inr}
-                                        </span>
-                                      </div>
-                                    </div>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSelectOption(opt)}
-                                      className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-brand-700 shadow-2xs"
+                              <div className="flex flex-wrap gap-1.5 text-[10px]">
+                                {Object.entries(item.response.extracted_entities)
+                                  .filter(
+                                    ([, val]) =>
+                                      val !== null && val !== undefined
+                                  )
+                                  .map(([k, v]) => (
+                                    <span
+                                      key={k}
+                                      className="rounded-md bg-white border border-slate-200 px-1.5 py-0.5 font-medium text-slate-700"
                                     >
-                                      <span>Select Bay</span>
-                                      <ChevronRight className="h-3 w-3" />
-                                    </button>
-                                  </div>
-                                ))}
+                                      <strong className="text-slate-500">
+                                        {k.replace("_", " ")}:
+                                      </strong>{" "}
+                                      {String(v)}
+                                    </span>
+                                  ))}
                               </div>
                             </div>
                           )}
 
-                        {/* Guardrail Banner */}
-                        <div className="flex items-center gap-1.5 text-[9px] text-slate-500">
-                          <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                          <span>
-                            Zero direct mutations. Driver must review &amp;
-                            confirm booking checkout.
-                          </span>
+                          {/* Validated Slot Recommendations */}
+                          {item.response.validated_options &&
+                            item.response.validated_options.length > 0 && (
+                              <div className="space-y-1.5 pt-1">
+                                <span className="text-[10px] font-bold text-slate-700">
+                                  Validated Database Matches (
+                                  {item.response.validated_options.length})
+                                </span>
+                                <div className="space-y-1.5">
+                                  {item.response.validated_options.map((opt) => (
+                                    <div
+                                      key={opt.slot_id}
+                                      className="flex items-center justify-between gap-2 rounded-xl border border-brand-200 bg-brand-50/40 p-2 text-xs"
+                                    >
+                                      <div>
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-mono font-black text-brand-700">
+                                            Bay {opt.slot_number}
+                                          </span>
+                                          <span className="text-slate-500">•</span>
+                                          <span className="text-[11px] font-bold text-slate-800">
+                                            {opt.lot_name}
+                                          </span>
+                                          {opt.slot_type === "EV_CHARGING" && (
+                                            <span className="rounded bg-emerald-100 px-1 text-[9px] font-extrabold text-emerald-800">
+                                              EV 50kW
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                          <span>Floor {opt.floor}</span>
+                                          <span>•</span>
+                                          <span>
+                                            {Math.round(opt.distance_km * 1000)}m
+                                            to gate
+                                          </span>
+                                          <span>•</span>
+                                          <span className="font-mono font-bold text-slate-800">
+                                            ₹{opt.estimated_total_inr}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSelectOption(opt)}
+                                        className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-brand-700 shadow-2xs"
+                                      >
+                                        <span>Select Bay</span>
+                                        <ChevronRight className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                          {/* Guardrail Banner */}
+                          <div className="flex items-center gap-1.5 text-[9px] text-slate-500">
+                            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                            <span>
+                              Zero direct mutations. Driver must review &amp;
+                              confirm booking checkout.
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
+                ))
+              )}
+              {loading && (
+                <div className="flex items-center gap-2 rounded-2xl bg-white border border-slate-200 p-3 text-xs text-slate-600 shadow-2xs">
+                  <Sparkles className="h-4 w-4 text-brand-600 animate-spin" />
+                  <span>
+                    Parkwise AI is parsing query and checking DB availability...
+                  </span>
                 </div>
-              ))
-            )}
-            {loading && (
-              <div className="flex items-center gap-2 rounded-2xl bg-white border border-slate-200 p-3 text-xs text-slate-600 shadow-2xs">
-                <Sparkles className="h-4 w-4 text-brand-600 animate-spin" />
-                <span>
-                  Parkwise AI is parsing query and checking DB availability...
-                </span>
-              </div>
-            )}
+              )}
+              <div ref={chatBottomRef} />
+            </div>
+
+            {/* Scroll Navigation Floating Buttons */}
+            <div className="absolute bottom-3 right-4 z-10 flex items-center gap-2">
+              {showScrollTop && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    chatContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" })
+                  }
+                  className="flex items-center gap-1 rounded-full bg-white/95 px-3 py-1.5 text-[10px] font-extrabold text-slate-700 shadow-md border border-slate-200 hover:bg-slate-100 transition-all cursor-pointer"
+                  title="Scroll to Top"
+                >
+                  <ArrowUp className="h-3 w-3" />
+                  <span>Top</span>
+                </button>
+              )}
+              {showScrollBottom && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    chatContainerRef.current?.scrollTo({
+                      top: chatContainerRef.current.scrollHeight,
+                      behavior: "smooth",
+                    })
+                  }
+                  className="flex items-center gap-1.5 rounded-full bg-brand-600 px-3.5 py-1.5 text-[11px] font-bold text-white shadow-lg hover:bg-brand-700 transition-all animate-bounce cursor-pointer"
+                  title="Jump to Latest"
+                >
+                  <span>Latest</span>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Input Bar */}

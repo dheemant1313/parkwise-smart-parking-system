@@ -675,6 +675,7 @@ export default function DriverBookingPage() {
           {/* RIGHT: Arrival Time, Duration, Vehicle Selection, Summary & Checkout */}
           <div className="space-y-6 lg:col-span-5">
             <form
+              id="booking-reservation-form"
               onSubmit={handleReserveAndPay}
               className="rounded-3xl border border-slate-200 bg-white p-6 shadow-apple space-y-5"
             >
