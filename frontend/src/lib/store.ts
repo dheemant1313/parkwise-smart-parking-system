@@ -70,7 +70,16 @@ function buildSlotsForLot(lotId: number): ParkingSlot[] {
   return slots;
 }
 
-function recalculateLotCounts(lot: ParkingLot): ParkingLot {
+type RawParkingLot = Omit<
+  ParkingLot,
+  | "total_slots"
+  | "available_slots"
+  | "occupied_slots"
+  | "reserved_slots"
+  | "ev_slots_available"
+>;
+
+function recalculateLotCounts(lot: RawParkingLot | ParkingLot): ParkingLot {
   const total = lot.slots.length;
   const available = lot.slots.filter((s) => s.status === "AVAILABLE").length;
   const occupied = lot.slots.filter((s) => s.status === "OCCUPIED").length;
@@ -802,11 +811,7 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
-  return (
-    <ParkwiseContext.Provider value={value}>
-      {children}
-    </ParkwiseContext.Provider>
-  );
+  return React.createElement(ParkwiseContext.Provider, { value }, children);
 }
 
 export function useParkwise(): ParkwiseContextValue {
