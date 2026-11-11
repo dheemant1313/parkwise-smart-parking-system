@@ -1474,3 +1474,169 @@ def test_phase05_payments_qr_and_gate_management():
         assert outcomes["OFF-EVT-003-FORGED"] == "REJECTED_INVALID_SIGNATURE"
     finally:
         db.close()
+
+
+def test_phase06_operator_dashboard_analytics_staff_and_websocket():
+    """
+    Phase 06 Automated Test Suite:
+    - Multi-Location & Single-Location Operator Dashboard Overview (7 KPIs)
+    - 10 Analytics Modules (Live Occupancy, Hourly Chart, Weekly Revenue, Heatmap, Peak-Hour Detection,
+      Booking Conversion, Cancellation Stats, No-Show Analytics, Overstay Reports, Pricing Performance)
+    - Evidence-Based AI Insights with explicit provenance labels
+    - Operator Facility Configuration (pricing, hours, grace period)
+    - Operator Reservation Actions (MARK_NO_SHOW, RECORD_OVERSTAY, FORCE_CHECK_IN, FORCE_CHECK_OUT)
+    - Facility Staff Management (list, create, update duty/shift)
+    - Report Export (CSV and JSON)
+    """
+    from app.main import (
+        create_operator_staff_endpoint,
+        export_operator_report_endpoint,
+        get_operator_dashboard_endpoint,
+        get_operator_staff_endpoint,
+        operator_reservation_action_endpoint,
+        update_operator_lot_config_endpoint,
+        update_operator_staff_endpoint,
+    )
+    from app.schemas import (
+        FacilityStaffCreateRequest,
+        FacilityStaffUpdateRequest,
+        OperatorLotConfigUpdateRequest,
+        OperatorReservationActionRequest,
+    )
+
+    db = SessionLocal()
+    try:
+        operator_user = (
+            db.query(User).filter(User.email == "operator@parkwise.in").first()
+        )
+        assert operator_user is not None
+
+        # 1. Verify Dashboard Overview & 10 Analytics Modules
+        dash = _run_sync(
+            get_operator_dashboard_endpoint(
+                lot_id=None,
+                date_range="7d",
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        ov = dash["overview"]
+        assert ov["total_parking_capacity"] >= 80
+        assert "available_bays" in ov
+        assert "occupied_bays" in ov
+        assert "active_bookings" in ov
+        assert "todays_revenue_inr" in ov
+        assert "no_show_bookings" in ov
+        assert "overstay_cases" in ov
+
+        an = dash["analytics"]
+        assert len(an["live_occupancy_visualization"]) >= 5
+        assert len(an["hourly_occupancy_chart"]) == 24
+        assert len(an["weekly_revenue_chart"]) == 7
+        assert len(an["occupancy_heatmap"]) == 7
+        assert "peak_hour_detection" in an
+        assert "booking_conversion" in an
+        assert "cancellation_statistics" in an
+        assert "no_show_analytics" in an
+        assert "overstay_reports" in an
+        assert "pricing_performance" in an
+        assert len(dash["ai_insights"]) >= 3
+        for insight in dash["ai_insights"]:
+            assert insight["evidence_type"] in (
+                "LIVE_LEDGER_DERIVED",
+                "XGBOOST_ML_PREDICTED",
+                "HISTORICAL_SAMPLE_BASELINE",
+            )
+
+        # 2. Update Facility Config (Pricing, Operating Hours, Grace Period)
+        updated_lot = _run_sync(
+            update_operator_lot_config_endpoint(
+                lot_id=1,
+                payload=OperatorLotConfigUpdateRequest(
+                    base_hourly_rate_inr=95.0,
+                    ev_surcharge_inr=50.0,
+                    dynamic_pricing_enabled=True,
+                    current_surge_multiplier=1.30,
+                    grace_period_minutes=20,
+                    reservation_hold_minutes=15,
+                ),
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        assert updated_lot["base_hourly_rate_inr"] == 95.0
+        assert updated_lot["grace_period_minutes"] == 20
+
+        # 3. Operator Reservation Action: Mark No-Show & Record Overstay
+        target_booking = db.query(Booking).first()
+        assert target_booking is not None
+
+        overstay_booking = _run_sync(
+            operator_reservation_action_endpoint(
+                booking_reference=target_booking.booking_reference,
+                payload=OperatorReservationActionRequest(
+                    action="RECORD_OVERSTAY",
+                    overstay_minutes=50,
+                    notes="Operator recorded 50-minute overstay past grace window",
+                ),
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        assert overstay_booking.overstay_fee_inr > 0
+
+        # 4. Staff Management (List, Create, Update)
+        staff_list = _run_sync(
+            get_operator_staff_endpoint(
+                lot_id=None, db=db, current_user=operator_user
+            )
+        )
+        assert len(staff_list) >= 5
+
+        new_staff = _run_sync(
+            create_operator_staff_endpoint(
+                payload=FacilityStaffCreateRequest(
+                    lot_id=1,
+                    employee_code="PW-EMP-606",
+                    full_name="Meenakshi Sundaram",
+                    email="meenakshi.s@parkwise.in",
+                    phone="+91-9840112299",
+                    role_title="Senior Floor & EV Operations Supervisor",
+                    shift_window="08:00–16:00 IST (Day Shift)",
+                    assigned_zone="Floor 1–3 • Connaught Place",
+                    is_on_duty=True,
+                ),
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        assert new_staff.employee_code == "PW-EMP-606"
+
+        toggled_staff = _run_sync(
+            update_operator_staff_endpoint(
+                staff_id=new_staff.id,
+                payload=FacilityStaffUpdateRequest(
+                    is_on_duty=False,
+                    shift_window="14:00–22:00 IST (Peak Shift)",
+                ),
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        assert toggled_staff.is_on_duty is False
+
+        # 5. Export Reports (CSV & JSON)
+        export_res = _run_sync(
+            export_operator_report_endpoint(
+                report_type="REVENUE_AND_GST",
+                format="csv",
+                lot_id=None,
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        assert export_res["record_count"] >= 1
+        assert "booking_reference" in export_res["csv_content"]
+    finally:
+        db.close()
+

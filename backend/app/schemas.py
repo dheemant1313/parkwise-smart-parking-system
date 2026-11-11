@@ -830,3 +830,64 @@ class AIPricingRecommendationResponse(BaseModel):
     anpr_readiness_score: float
     insight_summary: str
     hourly_forecast: List[AIForecastPoint]
+
+
+# ----------------------------------------------------------------------------
+# Phase 06: Parking Operator Dashboard, Staff Management & Reservation Control
+# ----------------------------------------------------------------------------
+class OperatorLotConfigUpdateRequest(BaseModel):
+    base_hourly_rate_inr: Optional[float] = Field(None, ge=10.0, le=5000.0)
+    ev_surcharge_inr: Optional[float] = Field(None, ge=0.0, le=2000.0)
+    dynamic_pricing_enabled: Optional[bool] = None
+    current_surge_multiplier: Optional[float] = Field(None, ge=1.0, le=3.0)
+    opening_time: Optional[str] = Field(None, pattern=r"^\d{2}:\d{2}$")
+    closing_time: Optional[str] = Field(None, pattern=r"^\d{2}:\d{2}$")
+    is_24_hours: Optional[bool] = None
+    grace_period_minutes: Optional[int] = Field(None, ge=0, le=180)
+    reservation_hold_minutes: Optional[int] = Field(None, ge=5, le=120)
+
+
+class OperatorReservationActionRequest(BaseModel):
+    action: str = Field(
+        ...,
+        pattern="^(MARK_NO_SHOW|FORCE_CHECK_IN|FORCE_CHECK_OUT|CANCEL_AND_RELEASE|RECORD_OVERSTAY)$",
+    )
+    overstay_minutes: int = Field(0, ge=0, le=1440)
+    notes: str = Field("Operator desk action", max_length=240)
+
+
+class FacilityStaffCreateRequest(BaseModel):
+    lot_id: int = Field(..., gt=0)
+    employee_code: str = Field(..., min_length=4, max_length=32)
+    full_name: str = Field(..., min_length=2, max_length=120)
+    email: EmailStr
+    phone: str = Field(..., min_length=8, max_length=24)
+    role_title: str = Field(..., min_length=3, max_length=80)
+    shift_window: str = Field("08:00–16:00 IST (Day Shift)", max_length=64)
+    assigned_zone: str = Field("All Floors & Gate Lanes", max_length=80)
+    is_on_duty: bool = True
+
+
+class FacilityStaffUpdateRequest(BaseModel):
+    role_title: Optional[str] = Field(None, max_length=80)
+    shift_window: Optional[str] = Field(None, max_length=64)
+    assigned_zone: Optional[str] = Field(None, max_length=80)
+    is_on_duty: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class FacilityStaffResponse(BaseModel):
+    id: int
+    lot_id: int
+    lot_name: str
+    employee_code: str
+    full_name: str
+    email: str
+    phone: str
+    role_title: str
+    shift_window: str
+    assigned_zone: str
+    is_on_duty: bool
+    is_active: bool
+    created_at: datetime
+

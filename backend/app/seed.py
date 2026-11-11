@@ -8,6 +8,7 @@ from app.models import (
     Booking,
     BookingEvent,
     BookingStatus,
+    FacilityStaff,
     GateLog,
     ParkingFloor,
     ParkingLot,
@@ -46,6 +47,10 @@ def seed_initial_data(db: Session) -> None:
         ("pricing:surge", "Configure Dynamic Surge", "OPERATOR", "Enable dynamic pricing and adjust surge multipliers"),
         ("ai:forecast", "Run AI Occupancy Forecast", "OPERATOR", "Execute XGBoost demand forecasting and tariff inference"),
         ("lot:manage", "Manage Parking Facility", "OPERATOR", "Manage multi-floor parking facility telemetry"),
+        ("operator:analytics", "Inspect Facility Analytics & Revenue", "OPERATOR", "View live occupancy, revenue, conversion, no-show, and overstay analytics"),
+        ("operator:staff", "Manage Facility Staff & Shifts", "OPERATOR", "Assign, update, and schedule facility staff and supervisors"),
+        ("operator:reservations", "Manage Reservations, No-Shows & Overstays", "OPERATOR", "Perform operator check-in/out, no-show marking, and overstay management"),
+        ("operator:export", "Export Analytical & Financial Reports", "OPERATOR", "Download CSV and JSON revenue, GST, occupancy, and reservation reports"),
         ("gate:scan", "Process Gate QR/ANPR Scan", "GATE", "Verify HMAC QR signatures and optical ANPR plates at barrier"),
         ("gate:logs", "Inspect Gate Telemetry Logs", "GATE", "View entry, exit, and denied boom-barrier events"),
         ("gate:override", "Manual Barrier Override", "GATE", "Authorize emergency or manual boom-barrier actuation"),
@@ -520,6 +525,30 @@ def seed_initial_data(db: Session) -> None:
             notes="Pre-authorized reservation ready for optical ANPR or QR scan.",
         )
         db.add(gate_log)
+
+    # 4. Seed Facility Staff Members for Phase 06 Operator Staff Management
+    staff_seed = [
+        (created_lots[0].id, "PW-EMP-101", "Rajeshwari Menon", "rajeshwari.menon@parkwise.in", "+91-9845091823", "Gate Terminal Supervisor", "06:00–14:00 IST (Morning)", "Gate Lanes 01–03 & ANPR Hub", True),
+        (created_lots[0].id, "PW-EMP-102", "Karanveer Singh Gill", "karanveer.gill@parkwise.in", "+91-9811234901", "EV Hypercharger Engineer", "14:00–22:00 IST (Peak)", "Floor 1 • Zone A (EV Fast-Charge)", True),
+        (created_lots[1].id, "PW-EMP-201", "Siddharth Deshmukh", "siddharth.d@parkwise.in", "+91-9820441129", "BKC Deck Operations Lead", "08:00–16:00 IST (Day Shift)", "All Floors • BKC Automated Deck", True),
+        (created_lots[2].id, "PW-EMP-301", "Ananya Krishnamurthy", "ananya.k@parkwise.in", "+91-9880112233", "Floor & Bay Telemetry Controller", "14:00–22:00 IST (Peak)", "Floor 1–2 • Indiranagar Plaza", True),
+        (created_lots[3].id, "PW-EMP-401", "Devendra Ahlawat", "devendra.a@parkwise.in", "+91-9818776655", "Night Shift Security & Barrier Lead", "22:00–06:00 IST (Night)", "CyberHub Autonomous Tower", False),
+    ]
+    for l_id, emp_code, f_name, em, ph, r_title, shift_w, zone_w, on_duty in staff_seed:
+        db.add(
+            FacilityStaff(
+                lot_id=l_id,
+                employee_code=emp_code,
+                full_name=f_name,
+                email=em,
+                phone=ph,
+                role_title=r_title,
+                shift_window=shift_w,
+                assigned_zone=zone_w,
+                is_on_duty=on_duty,
+                is_active=True,
+            )
+        )
 
     audit = AuditLog(
         actor_email="admin@parkwise.in",

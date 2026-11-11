@@ -79,6 +79,9 @@ from app.schemas import (
     DurationAndQuoteRequest,
     DurationAndQuoteResponse,
     EmailVerificationRequest,
+    FacilityStaffCreateRequest,
+    FacilityStaffResponse,
+    FacilityStaffUpdateRequest,
     ForgotPasswordRequest,
     GateManualOverrideRequest,
     GateManualOverrideResponse,
@@ -89,6 +92,8 @@ from app.schemas import (
     OfflineGateSyncRequest,
     OfflineGateSyncResponse,
     OfflineGateSyncResultItem,
+    OperatorLotConfigUpdateRequest,
+    OperatorReservationActionRequest,
     ParkingBayCreateRequest,
     ParkingFloorCreateRequest,
     ParkingFloorResponse,
@@ -143,6 +148,15 @@ from app.services.booking_service import (
     release_expired_reservations,
     revoke_qr_pass,
     verify_qr_signature,
+)
+from app.services.operator_service import (
+    build_operator_dashboard_analytics,
+    create_facility_staff,
+    execute_operator_reservation_action,
+    generate_operator_report_export,
+    list_facility_staff,
+    update_facility_staff,
+    update_operator_lot_config,
 )
 from app.services.payment_service import (
     create_or_refresh_razorpay_order,
@@ -2693,8 +2707,148 @@ async def list_gate_logs(
 
 
 # ----------------------------------------------------------------------------
-# 7. Operator Controls (Slot Status & AI Dynamic Surge Configuration)
+# 7. Operator Controls & Phase 06 Multi-Location Operator Dashboard Platform
 # ----------------------------------------------------------------------------
+@app.get("/api/v1/operator/dashboard")
+async def get_operator_dashboard_endpoint(
+    lot_id: Optional[int] = Query(None),
+    date_range: str = Query("7d"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("operator:analytics")),
+):
+    data = build_operator_dashboard_analytics(
+        db=db, lot_id=lot_id, date_range=date_range
+    )
+    data["authorized_by"] = current_user.email
+    data["authorized_role"] = current_user.role.value
+    return data
+
+
+@app.patch(
+    "/api/v1/operator/lots/{lot_id}/config",
+    response_model=ParkingLotResponse,
+)
+async def update_operator_lot_config_endpoint(
+    lot_id: int,
+    payload: OperatorLotConfigUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("lot:manage")),
+):
+    lot = update_operator_lot_config(
+        db=db, lot_id=lot_id, payload=payload, actor=current_user
+    )
+    await ws_manager.broadcast_event(
+        "LOT_CONFIG_UPDATED",
+        {
+            "lot_id": lot.id,
+            "lot_code": lot.code,
+            "base_hourly_rate_inr": lot.base_hourly_rate_inr,
+            "ev_surcharge_inr": lot.ev_surcharge_inr,
+            "dynamic_pricing_enabled": lot.dynamic_pricing_enabled,
+            "current_surge_multiplier": lot.current_surge_multiplier,
+            "grace_period_minutes": lot.grace_period_minutes,
+        },
+    )
+    return _serialize_lot(lot, include_slots=False)
+
+
+@app.post(
+    "/api/v1/operator/reservations/{booking_reference}/action",
+    response_model=BookingResponse,
+)
+async def operator_reservation_action_endpoint(
+    booking_reference: str,
+    payload: OperatorReservationActionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("operator:reservations")),
+):
+    booking = execute_operator_reservation_action(
+        db=db,
+        booking_reference=booking_reference,
+        payload=payload,
+        actor=current_user,
+    )
+    await ws_manager.broadcast_event(
+        "BOOKING_UPDATED",
+        {
+            "booking_reference": booking.booking_reference,
+            "lot_id": booking.lot_id,
+            "slot_id": booking.slot_id,
+            "status": booking.status.value,
+            "is_no_show": bool(getattr(booking, "is_no_show", False)),
+            "overstay_fee_inr": booking.overstay_fee_inr,
+        },
+    )
+    return _serialize_booking(booking)
+
+
+@app.get(
+    "/api/v1/operator/staff",
+    response_model=List[FacilityStaffResponse],
+)
+async def get_operator_staff_endpoint(
+    lot_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("operator:staff")),
+):
+    return list_facility_staff(db=db, lot_id=lot_id)
+
+
+@app.post(
+    "/api/v1/operator/staff",
+    response_model=FacilityStaffResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_operator_staff_endpoint(
+    payload: FacilityStaffCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("operator:staff")),
+):
+    return create_facility_staff(db=db, payload=payload, actor=current_user)
+
+
+@app.patch(
+    "/api/v1/operator/staff/{staff_id}",
+    response_model=FacilityStaffResponse,
+)
+async def update_operator_staff_endpoint(
+    staff_id: int,
+    payload: FacilityStaffUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("operator:staff")),
+):
+    return update_facility_staff(
+        db=db, staff_id=staff_id, payload=payload, actor=current_user
+    )
+
+
+@app.get("/api/v1/operator/reports/export")
+async def export_operator_report_endpoint(
+    report_type: str = Query("REVENUE_AND_GST"),
+    format: str = Query("csv"),
+    lot_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("operator:export")),
+):
+    report = generate_operator_report_export(
+        db=db,
+        report_type=report_type,
+        export_format=format,
+        lot_id=lot_id,
+    )
+    db.add(
+        AuditLog(
+            actor_email=current_user.email,
+            actor_role=current_user.role.value,
+            action="OPERATOR_REPORT_EXPORTED",
+            target_resource=report["filename"],
+            details=f"Exported {report_type} report ({report['record_count']} rows) in {format.upper()} format.",
+        )
+    )
+    db.commit()
+    return report
+
+
 @app.patch("/api/v1/operator/slots/{slot_id}", response_model=SlotResponse)
 async def update_slot_status(
     slot_id: int,
@@ -2815,7 +2969,7 @@ async def get_admin_overview(
 
 
 # ----------------------------------------------------------------------------
-# 10. Real-Time Telemetry WebSocket Endpoint
+# 10. Real-Time Telemetry & Operator WebSocket Endpoints
 # ----------------------------------------------------------------------------
 @app.websocket("/ws/telemetry")
 async def websocket_telemetry(websocket: WebSocket):
@@ -2832,3 +2986,33 @@ async def websocket_telemetry(websocket: WebSocket):
             )
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
+
+
+@app.websocket("/ws/operator")
+async def websocket_operator_dashboard(websocket: WebSocket):
+    await ws_manager.connect(websocket)
+    db = SessionLocal()
+    try:
+        snapshot = build_operator_dashboard_analytics(db=db, lot_id=None, date_range="7d")
+        await websocket.send_json(
+            {
+                "event": "INITIAL_OPERATOR_SNAPSHOT",
+                "payload": snapshot["overview"],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        while True:
+            msg = await websocket.receive_text()
+            refreshed = build_operator_dashboard_analytics(db=db, lot_id=None, date_range="7d")
+            await websocket.send_json(
+                {
+                    "event": "OPERATOR_LIVE_SYNC",
+                    "echo": msg,
+                    "payload": refreshed["overview"],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    finally:
+        db.close()

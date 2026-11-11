@@ -390,6 +390,7 @@ class Booking(Base):
     checked_in_at = Column(DateTime(timezone=True), nullable=True)
     checked_out_at = Column(DateTime(timezone=True), nullable=True)
     overstay_fee_inr = Column(Float, default=0.0, nullable=False)
+    is_no_show = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now)
 
     user = relationship("User", back_populates="bookings")
@@ -514,3 +515,25 @@ class AuditLog(Base):
     details = Column(Text, nullable=True)
     ip_address = Column(String(64), default="127.0.0.1", nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
+
+
+class FacilityStaff(Base):
+    __tablename__ = "facility_staff"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lot_id = Column(Integer, ForeignKey("parking_lots.id"), nullable=False, index=True)
+    employee_code = Column(String(32), unique=True, index=True, nullable=False)
+    full_name = Column(String(120), nullable=False)
+    email = Column(String(160), nullable=False)
+    phone = Column(String(24), nullable=False)
+    role_title = Column(String(80), nullable=False)
+    shift_window = Column(
+        String(64), default="08:00–16:00 IST (Day Shift)", nullable=False
+    )
+    assigned_zone = Column(
+        String(80), default="All Floors & Gate Lanes", nullable=False
+    )
+    is_on_duty = Column(Boolean, default=True, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+

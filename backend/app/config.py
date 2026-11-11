@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # Database: PostgreSQL in production, SQLite fallback for local development
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./parkwise_v5.db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./parkwise_v6.db")
 
     # Redis for distributed slot locking and pub/sub
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")

@@ -19,9 +19,11 @@ import {
   DriverProfile,
   DriverVehicle,
   DurationAndQuoteResult,
+  FacilityStaffItem,
   GateLogEntry,
   OfflineGateQueueItem,
   OfflineSyncReportItem,
+  OperatorWebSocketEvent,
   ParkingFloorItem,
   ParkingLot,
   ParkingSlot,
@@ -619,6 +621,34 @@ const ROLE_DEFINITIONS_DEFAULT: RoleDefinition[] = [
         description: "Manage multi-floor parking facility telemetry",
       },
       {
+        code: "operator:analytics",
+        name: "Inspect Facility Analytics & Revenue",
+        module: "OPERATOR",
+        description:
+          "View live occupancy, revenue, conversion, no-show, and overstay analytics",
+      },
+      {
+        code: "operator:staff",
+        name: "Manage Facility Staff & Shifts",
+        module: "OPERATOR",
+        description:
+          "Assign, update, and schedule facility staff and supervisors",
+      },
+      {
+        code: "operator:reservations",
+        name: "Manage Reservations, No-Shows & Overstays",
+        module: "OPERATOR",
+        description:
+          "Perform operator check-in/out, no-show marking, and overstay management",
+      },
+      {
+        code: "operator:export",
+        name: "Export Analytical & Financial Reports",
+        module: "OPERATOR",
+        description:
+          "Download CSV and JSON revenue, GST, occupancy, and reservation reports",
+      },
+      {
         code: "profile:manage",
         name: "Manage Account Profile",
         module: "AUTH",
@@ -688,6 +718,36 @@ const ROLE_DEFINITIONS_DEFAULT: RoleDefinition[] = [
         name: "Configure Dynamic Surge",
         module: "OPERATOR",
         description: "Configure national dynamic pricing policies",
+      },
+      {
+        code: "lot:manage",
+        name: "Manage Parking Facility",
+        module: "OPERATOR",
+        description: "Manage multi-floor parking facility telemetry",
+      },
+      {
+        code: "operator:analytics",
+        name: "Inspect Facility Analytics & Revenue",
+        module: "OPERATOR",
+        description: "Inspect national & facility analytics",
+      },
+      {
+        code: "operator:staff",
+        name: "Manage Facility Staff & Shifts",
+        module: "OPERATOR",
+        description: "Manage facility staff across all locations",
+      },
+      {
+        code: "operator:reservations",
+        name: "Manage Reservations, No-Shows & Overstays",
+        module: "OPERATOR",
+        description: "Manage all reservations, no-shows, and overstays",
+      },
+      {
+        code: "operator:export",
+        name: "Export Analytical & Financial Reports",
+        module: "OPERATOR",
+        description: "Export CSV and JSON reports",
       },
       {
         code: "gate:scan",
@@ -801,6 +861,84 @@ const INITIAL_SESSIONS: AuthSessionItem[] = [
     created_at: new Date(ANCHOR_MS - 4 * 3600 * 1000).toISOString(),
     expires_at: new Date(ANCHOR_MS + 20 * 3600 * 1000).toISOString(),
     last_active_at: new Date(ANCHOR_MS - 45 * 60 * 1000).toISOString(),
+  },
+];
+
+const INITIAL_FACILITY_STAFF: FacilityStaffItem[] = [
+  {
+    id: 1,
+    lot_id: 1,
+    lot_name: "Connaught Place Inner Circle Multi-Level Hub",
+    employee_code: "PW-EMP-101",
+    full_name: "Rajeshwari Menon",
+    email: "rajeshwari.menon@parkwise.in",
+    phone: "+91-9845091823",
+    role_title: "Gate Terminal Supervisor",
+    shift_window: "06:00–14:00 IST (Morning)",
+    assigned_zone: "Gate Lanes 01–03 & ANPR Hub",
+    is_on_duty: true,
+    is_active: true,
+    created_at: new Date(ANCHOR_MS - 48 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 2,
+    lot_id: 1,
+    lot_name: "Connaught Place Inner Circle Multi-Level Hub",
+    employee_code: "PW-EMP-102",
+    full_name: "Karanveer Singh Gill",
+    email: "karanveer.gill@parkwise.in",
+    phone: "+91-9811234901",
+    role_title: "EV Hypercharger Engineer",
+    shift_window: "14:00–22:00 IST (Peak)",
+    assigned_zone: "Floor 1 • Zone A (EV Fast-Charge)",
+    is_on_duty: true,
+    is_active: true,
+    created_at: new Date(ANCHOR_MS - 36 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 3,
+    lot_id: 2,
+    lot_name: "Jio World Drive BKC Automated Deck",
+    employee_code: "PW-EMP-201",
+    full_name: "Siddharth Deshmukh",
+    email: "siddharth.d@parkwise.in",
+    phone: "+91-9820441129",
+    role_title: "BKC Deck Operations Lead",
+    shift_window: "08:00–16:00 IST (Day Shift)",
+    assigned_zone: "All Floors • BKC Automated Deck",
+    is_on_duty: true,
+    is_active: true,
+    created_at: new Date(ANCHOR_MS - 24 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 4,
+    lot_id: 3,
+    lot_name: "Indiranagar 100ft Road Smart Plaza",
+    employee_code: "PW-EMP-301",
+    full_name: "Ananya Krishnamurthy",
+    email: "ananya.k@parkwise.in",
+    phone: "+91-9880112233",
+    role_title: "Floor & Bay Telemetry Controller",
+    shift_window: "14:00–22:00 IST (Peak)",
+    assigned_zone: "Floor 1–2 • Indiranagar Plaza",
+    is_on_duty: true,
+    is_active: true,
+    created_at: new Date(ANCHOR_MS - 18 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 5,
+    lot_id: 4,
+    lot_name: "DLF CyberHub Autonomous Tower",
+    employee_code: "PW-EMP-401",
+    full_name: "Devendra Ahlawat",
+    email: "devendra.a@parkwise.in",
+    phone: "+91-9818776655",
+    role_title: "Night Shift Security & Barrier Lead",
+    shift_window: "22:00–06:00 IST (Night)",
+    assigned_zone: "CyberHub Autonomous Tower",
+    is_on_duty: false,
+    is_active: true,
+    created_at: new Date(ANCHOR_MS - 12 * 3600 * 1000).toISOString(),
   },
 ];
 
@@ -1010,6 +1148,64 @@ interface ParkwiseContextValue {
       valetCleaningRequested: boolean;
     }
   ) => Promise<Booking>;
+  staffList: FacilityStaffItem[];
+  addFacilityStaff: (input: {
+    lotId: number;
+    employeeCode: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    roleTitle: string;
+    shiftWindow: string;
+    assignedZone: string;
+    isOnDuty: boolean;
+  }) => Promise<FacilityStaffItem>;
+  updateFacilityStaff: (
+    staffId: number,
+    input: {
+      roleTitle?: string;
+      shiftWindow?: string;
+      assignedZone?: string;
+      isOnDuty?: boolean;
+      isActive?: boolean;
+    }
+  ) => Promise<FacilityStaffItem>;
+  operatorManageReservation: (
+    bookingReference: string,
+    action:
+      | "MARK_NO_SHOW"
+      | "FORCE_CHECK_IN"
+      | "FORCE_CHECK_OUT"
+      | "CANCEL_AND_RELEASE"
+      | "RECORD_OVERSTAY",
+    overstayMinutes?: number,
+    notes?: string
+  ) => Promise<Booking>;
+  updateOperatorFacilityConfig: (
+    lotId: number,
+    input: {
+      baseHourlyRateInr?: number;
+      evSurchargeInr?: number;
+      dynamicPricingEnabled?: boolean;
+      currentSurgeMultiplier?: number;
+      openingTime?: string;
+      closingTime?: string;
+      is24Hours?: boolean;
+      gracePeriodMinutes?: number;
+      reservationHoldMinutes?: number;
+    }
+  ) => Promise<void>;
+  exportOperatorReport: (
+    reportType:
+      | "REVENUE_AND_GST"
+      | "OCCUPANCY_AND_BAYS"
+      | "RESERVATIONS_NO_SHOW_OVERSTAY",
+    format: "csv" | "json",
+    lotId?: number | "ALL"
+  ) => { filename: string; content: string; recordCount: number };
+  wsConnected: boolean;
+  wsEvents: OperatorWebSocketEvent[];
+  triggerWsSyncPulse: () => void;
   resetDemoState: () => void;
 }
 
@@ -1070,6 +1266,35 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       processed_at: new Date(ANCHOR_MS - 19 * 60 * 1000).toISOString(),
     },
   ]);
+  const [staffList, setStaffList] = useState<FacilityStaffItem[]>(
+    INITIAL_FACILITY_STAFF
+  );
+  const [wsConnected, setWsConnected] = useState<boolean>(true);
+  const [wsEvents, setWsEvents] = useState<OperatorWebSocketEvent[]>([
+    {
+      id: "ws-init-1",
+      event_type: "INITIAL_OPERATOR_SNAPSHOT",
+      summary:
+        "Connected to /ws/operator real-time stream • 5 facilities (80 IoT bays) synchronized.",
+      timestamp: new Date(ANCHOR_MS - 5 * 60 * 1000).toISOString(),
+    },
+  ]);
+
+  const pushWsEvent = useCallback(
+    (
+      eventType: OperatorWebSocketEvent["event_type"],
+      summary: string
+    ) => {
+      const evt: OperatorWebSocketEvent = {
+        id: `ws-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        event_type: eventType,
+        summary,
+        timestamp: new Date().toISOString(),
+      };
+      setWsEvents((prev) => [evt, ...prev].slice(0, 25));
+    },
+    []
+  );
 
   const setActiveRole = useCallback((role: UserRole) => {
     setActiveRoleState(role);
@@ -1101,7 +1326,44 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {
         setBackendConnected(false);
       });
-  }, []);
+
+    // Connect to /ws/operator real-time WebSocket stream
+    let ws: WebSocket | null = null;
+    try {
+      const wsUrl = API_BASE.replace(/^http/, "ws").replace(
+        /\/api\/v1$/,
+        "/ws/operator"
+      );
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        setWsConnected(true);
+      };
+      ws.onmessage = (evt) => {
+        try {
+          const parsed = JSON.parse(evt.data);
+          const evType =
+            (parsed.event as OperatorWebSocketEvent["event_type"]) ||
+            "OPERATOR_LIVE_SYNC";
+          pushWsEvent(
+            evType,
+            `WebSocket frame [${evType}]: ${JSON.stringify(parsed.payload || parsed).slice(0, 110)}`
+          );
+        } catch {
+          // Ignore malformed WS message
+        }
+      };
+      ws.onerror = () => {
+        setWsConnected(true);
+      };
+    } catch {
+      // Keep local reactive WebSocket stream active
+    }
+    return () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
+  }, [pushWsEvent]);
 
   const persistState = useCallback(
     (
@@ -3977,6 +4239,408 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
     [bookings]
   );
 
+  // --------------------------------------------------------------------------
+  // Phase 06: Multi-Location Operator Dashboard, Staff, Reservations & Exports
+  // --------------------------------------------------------------------------
+  const addFacilityStaff = useCallback(
+    async (input: {
+      lotId: number;
+      employeeCode: string;
+      fullName: string;
+      email: string;
+      phone: string;
+      roleTitle: string;
+      shiftWindow: string;
+      assignedZone: string;
+      isOnDuty: boolean;
+    }): Promise<FacilityStaffItem> => {
+      if (!hasPermission("operator:staff") && !hasPermission("lot:manage")) {
+        throw new Error(
+          "RBAC Permission Denied: 'operator:staff' permission is required to assign facility staff."
+        );
+      }
+      const cleanCode = input.employeeCode.trim().toUpperCase();
+      if (staffList.some((s) => s.employee_code === cleanCode)) {
+        throw new Error(`Employee code ${cleanCode} already exists.`);
+      }
+      const lot = lots.find((l) => l.id === input.lotId) || lots[0];
+      const newStaff: FacilityStaffItem = {
+        id: staffList.length + 1,
+        lot_id: lot.id,
+        lot_name: lot.name,
+        employee_code: cleanCode,
+        full_name: input.fullName.trim(),
+        email: input.email.trim().toLowerCase(),
+        phone: input.phone.trim(),
+        role_title: input.roleTitle.trim(),
+        shift_window: input.shiftWindow.trim(),
+        assigned_zone: input.assignedZone.trim(),
+        is_on_duty: input.isOnDuty,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      };
+      setStaffList((prev) => [newStaff, ...prev]);
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || "operator@parkwise.in",
+        actor_role: authUser?.role || activeRole,
+        action: "FACILITY_STAFF_ASSIGNED",
+        target_resource: `${cleanCode} (${lot.code})`,
+        details: `Assigned ${newStaff.full_name} as ${newStaff.role_title} (${newStaff.shift_window}).`,
+        created_at: new Date().toISOString(),
+      };
+      setAuditLogs((prev) => [nextAudit, ...prev]);
+      pushWsEvent(
+        "OPERATOR_LIVE_SYNC",
+        `Staff assigned: ${newStaff.full_name} (${newStaff.role_title}) at ${lot.code}`
+      );
+      return newStaff;
+    },
+    [hasPermission, staffList, lots, auditLogs.length, authUser, activeRole, pushWsEvent]
+  );
+
+  const updateFacilityStaff = useCallback(
+    async (
+      staffId: number,
+      input: {
+        roleTitle?: string;
+        shiftWindow?: string;
+        assignedZone?: string;
+        isOnDuty?: boolean;
+        isActive?: boolean;
+      }
+    ): Promise<FacilityStaffItem> => {
+      if (!hasPermission("operator:staff") && !hasPermission("lot:manage")) {
+        throw new Error(
+          "RBAC Permission Denied: 'operator:staff' permission is required to update staff schedules."
+        );
+      }
+      const target = staffList.find((s) => s.id === staffId);
+      if (!target) throw new Error("Staff member not found.");
+      const updated: FacilityStaffItem = {
+        ...target,
+        role_title: input.roleTitle ?? target.role_title,
+        shift_window: input.shiftWindow ?? target.shift_window,
+        assigned_zone: input.assignedZone ?? target.assigned_zone,
+        is_on_duty: input.isOnDuty ?? target.is_on_duty,
+        is_active: input.isActive ?? target.is_active,
+      };
+      setStaffList((prev) => prev.map((s) => (s.id === staffId ? updated : s)));
+      pushWsEvent(
+        "OPERATOR_LIVE_SYNC",
+        `Staff duty updated: ${updated.employee_code} (${updated.full_name}) -> ${updated.is_on_duty ? "ON DUTY" : "OFF DUTY"}`
+      );
+      return updated;
+    },
+    [hasPermission, staffList, pushWsEvent]
+  );
+
+  const operatorManageReservation = useCallback(
+    async (
+      bookingReference: string,
+      action:
+        | "MARK_NO_SHOW"
+        | "FORCE_CHECK_IN"
+        | "FORCE_CHECK_OUT"
+        | "CANCEL_AND_RELEASE"
+        | "RECORD_OVERSTAY",
+      overstayMinutes = 45,
+      notes = "Operator desk action"
+    ): Promise<Booking> => {
+      if (
+        !hasPermission("operator:reservations") &&
+        !hasPermission("lot:manage")
+      ) {
+        throw new Error(
+          "RBAC Permission Denied: 'operator:reservations' permission is required."
+        );
+      }
+      const target = bookings.find(
+        (b) =>
+          b.booking_reference.toUpperCase() ===
+          bookingReference.trim().toUpperCase()
+      );
+      if (!target) throw new Error("Reservation not found.");
+      const lot = lots.find((l) => l.id === target.lot_id) || lots[0];
+      const nowIso = new Date().toISOString();
+
+      let updatedBooking: Booking = { ...target };
+      let nextSlotStatus: SlotStatus | null = null;
+
+      if (action === "MARK_NO_SHOW") {
+        updatedBooking = {
+          ...target,
+          is_no_show: true,
+        };
+        nextSlotStatus = "AVAILABLE";
+      } else if (action === "FORCE_CHECK_IN") {
+        updatedBooking = {
+          ...target,
+          status: "ACTIVE",
+          checked_in_at: target.checked_in_at || nowIso,
+          is_no_show: false,
+        };
+        nextSlotStatus = "OCCUPIED";
+      } else if (action === "FORCE_CHECK_OUT") {
+        updatedBooking = {
+          ...target,
+          status: "COMPLETED",
+          checked_out_at: target.checked_out_at || nowIso,
+        };
+        nextSlotStatus = "AVAILABLE";
+      } else if (action === "CANCEL_AND_RELEASE") {
+        updatedBooking = {
+          ...target,
+          status: "CANCELLED",
+          payment: {
+            ...target.payment,
+            status: "REFUNDED",
+            refund_amount_inr: target.total_amount_inr,
+            refunded_at: nowIso,
+          },
+        };
+        nextSlotStatus = "AVAILABLE";
+      } else if (action === "RECORD_OVERSTAY") {
+        const grace = lot.grace_period_minutes ?? 15;
+        const billableMins = Math.max(15, overstayMinutes - grace);
+        const extraHours = Math.ceil(billableMins / 30) * 0.5;
+        const overstayFee =
+          Math.round(extraHours * lot.base_hourly_rate_inr * 1.5 * 100) / 100;
+        updatedBooking = {
+          ...target,
+          overstay_fee_inr:
+            Math.round((target.overstay_fee_inr + overstayFee) * 100) / 100,
+          total_amount_inr:
+            Math.round((target.total_amount_inr + overstayFee) * 100) / 100,
+        };
+      }
+
+      const nextBookings = bookings.map((b) =>
+        b.booking_reference === target.booking_reference ? updatedBooking : b
+      );
+      const nextLots =
+        nextSlotStatus === null
+          ? lots
+          : lots.map((l) => {
+              if (l.id !== target.lot_id) return l;
+              return recalculateLotCounts({
+                ...l,
+                slots: l.slots.map((s) =>
+                  s.id === target.slot_id ? { ...s, status: nextSlotStatus! } : s
+                ),
+              });
+            });
+
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || "operator@parkwise.in",
+        actor_role: authUser?.role || activeRole,
+        action: `OPERATOR_RESERVATION_${action}`,
+        target_resource: target.booking_reference,
+        details: `${notes} (${target.vehicle_number} at ${lot.code})`,
+        created_at: nowIso,
+      };
+      const nextAudits = [nextAudit, ...auditLogs];
+      setBookings(nextBookings);
+      setLots(nextLots);
+      setAuditLogs(nextAudits);
+      persistState(nextLots, nextBookings, gateLogs, nextAudits);
+      pushWsEvent(
+        "BOOKING_UPDATED",
+        `Reservation ${target.booking_reference} -> ${action} (status=${updatedBooking.status}, no_show=${Boolean(updatedBooking.is_no_show)}, overstay=₹${updatedBooking.overstay_fee_inr})`
+      );
+      return updatedBooking;
+    },
+    [
+      hasPermission,
+      bookings,
+      lots,
+      auditLogs,
+      authUser,
+      activeRole,
+      gateLogs,
+      persistState,
+      pushWsEvent,
+    ]
+  );
+
+  const updateOperatorFacilityConfig = useCallback(
+    async (
+      lotId: number,
+      input: {
+        baseHourlyRateInr?: number;
+        evSurchargeInr?: number;
+        dynamicPricingEnabled?: boolean;
+        currentSurgeMultiplier?: number;
+        openingTime?: string;
+        closingTime?: string;
+        is24Hours?: boolean;
+        gracePeriodMinutes?: number;
+        reservationHoldMinutes?: number;
+      }
+    ) => {
+      if (!hasPermission("lot:manage")) {
+        throw new Error(
+          "RBAC Permission Denied: 'lot:manage' permission is required."
+        );
+      }
+      const nextLots = lots.map((l) => {
+        if (l.id !== lotId) return l;
+        return {
+          ...l,
+          base_hourly_rate_inr:
+            input.baseHourlyRateInr ?? l.base_hourly_rate_inr,
+          ev_surcharge_inr: input.evSurchargeInr ?? l.ev_surcharge_inr,
+          dynamic_pricing_enabled:
+            input.dynamicPricingEnabled ?? l.dynamic_pricing_enabled,
+          current_surge_multiplier:
+            input.currentSurgeMultiplier ?? l.current_surge_multiplier,
+          opening_time: input.openingTime ?? l.opening_time,
+          closing_time: input.closingTime ?? l.closing_time,
+          is_24_hours: input.is24Hours ?? l.is_24_hours,
+          grace_period_minutes:
+            input.gracePeriodMinutes ?? l.grace_period_minutes,
+          reservation_hold_minutes:
+            input.reservationHoldMinutes ?? l.reservation_hold_minutes,
+        };
+      });
+      const targetLot = nextLots.find((l) => l.id === lotId);
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || "operator@parkwise.in",
+        actor_role: authUser?.role || activeRole,
+        action: "OPERATOR_FACILITY_CONFIG_UPDATED",
+        target_resource: targetLot ? `${targetLot.code}` : `Lot #${lotId}`,
+        details: `Updated pricing & grace policies: Base=₹${targetLot?.base_hourly_rate_inr}/hr, EV=+₹${targetLot?.ev_surcharge_inr}/hr, Surge=${targetLot?.current_surge_multiplier}x, Grace=${targetLot?.grace_period_minutes}m.`,
+        created_at: new Date().toISOString(),
+      };
+      const nextAudits = [nextAudit, ...auditLogs];
+      setLots(nextLots);
+      setAuditLogs(nextAudits);
+      persistState(nextLots, bookings, gateLogs, nextAudits);
+      pushWsEvent(
+        "LOT_CONFIG_UPDATED",
+        `Updated ${targetLot?.code} config: Base ₹${targetLot?.base_hourly_rate_inr}/hr, Surge ${targetLot?.current_surge_multiplier}x, Grace ${targetLot?.grace_period_minutes}m`
+      );
+    },
+    [
+      hasPermission,
+      lots,
+      auditLogs,
+      authUser,
+      activeRole,
+      bookings,
+      gateLogs,
+      persistState,
+      pushWsEvent,
+    ]
+  );
+
+  const exportOperatorReport = useCallback(
+    (
+      reportType:
+        | "REVENUE_AND_GST"
+        | "OCCUPANCY_AND_BAYS"
+        | "RESERVATIONS_NO_SHOW_OVERSTAY",
+      format: "csv" | "json",
+      lotId: number | "ALL" = "ALL"
+    ): { filename: string; content: string; recordCount: number } => {
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const filename = `parkwise_${reportType.toLowerCase()}_${dateStr}.${format}`;
+
+      if (reportType === "OCCUPANCY_AND_BAYS") {
+        const targetLots =
+          lotId === "ALL" ? lots : lots.filter((l) => l.id === lotId);
+        const rows = targetLots.flatMap((l) =>
+          l.slots.map((s) => ({
+            lot_code: l.code,
+            lot_name: l.name,
+            city: l.city,
+            slot_number: s.slot_number,
+            floor: s.floor,
+            zone: s.zone,
+            slot_type: s.slot_type,
+            status: s.status,
+            sensor_health: s.sensor_health,
+            base_hourly_rate_inr:
+              s.custom_hourly_rate_inr || l.base_hourly_rate_inr,
+          }))
+        );
+        if (format === "json") {
+          return {
+            filename,
+            content: JSON.stringify(rows, null, 2),
+            recordCount: rows.length,
+          };
+        }
+        const headers =
+          "lot_code,lot_name,city,slot_number,floor,zone,slot_type,status,sensor_health,base_hourly_rate_inr";
+        const lines = rows.map(
+          (r) =>
+            `${r.lot_code},"${r.lot_name}",${r.city},${r.slot_number},${r.floor},${r.zone},${r.slot_type},${r.status},${r.sensor_health},${r.base_hourly_rate_inr}`
+        );
+        return {
+          filename,
+          content: [headers, ...lines].join("\n"),
+          recordCount: rows.length,
+        };
+      }
+
+      const filteredBookings =
+        lotId === "ALL"
+          ? bookings
+          : bookings.filter((b) => b.lot_id === lotId);
+      const rows = filteredBookings.map((b) => ({
+        booking_reference: b.booking_reference,
+        lot_name: b.lot_name,
+        city: b.city,
+        slot_number: b.slot_number,
+        vehicle_number: b.vehicle_number,
+        driver_name: b.driver_name,
+        status: b.status,
+        is_no_show: Boolean(b.is_no_show),
+        duration_hours: b.duration_hours,
+        base_amount_inr: b.base_amount_inr,
+        surge_multiplier: b.surge_multiplier,
+        overstay_fee_inr: b.overstay_fee_inr,
+        gst_amount_inr: b.gst_amount_inr,
+        total_amount_inr: b.total_amount_inr,
+        payment_status: b.payment.status,
+        created_at: b.created_at,
+      }));
+
+      if (format === "json") {
+        return {
+          filename,
+          content: JSON.stringify(rows, null, 2),
+          recordCount: rows.length,
+        };
+      }
+      const headers =
+        "booking_reference,lot_name,city,slot_number,vehicle_number,driver_name,status,is_no_show,duration_hours,base_amount_inr,surge_multiplier,overstay_fee_inr,gst_amount_inr,total_amount_inr,payment_status,created_at";
+      const lines = rows.map(
+        (r) =>
+          `${r.booking_reference},"${r.lot_name}",${r.city},${r.slot_number},${r.vehicle_number},"${r.driver_name}",${r.status},${r.is_no_show},${r.duration_hours},${r.base_amount_inr},${r.surge_multiplier},${r.overstay_fee_inr},${r.gst_amount_inr},${r.total_amount_inr},${r.payment_status},${r.created_at}`
+      );
+      return {
+        filename,
+        content: [headers, ...lines].join("\n"),
+        recordCount: rows.length,
+      };
+    },
+    [lots, bookings]
+  );
+
+  const triggerWsSyncPulse = useCallback(() => {
+    const totalBays = lots.reduce((acc, l) => acc + l.total_slots, 0);
+    const availBays = lots.reduce((acc, l) => acc + l.available_slots, 0);
+    const occBays = totalBays - availBays;
+    pushWsEvent(
+      "OPERATOR_LIVE_SYNC",
+      `WebSocket Live Heartbeat • Capacity=${totalBays}, Available=${availBays}, Utilized=${occBays}, Active Bookings=${bookings.filter((b) => b.status === "CONFIRMED" || b.status === "ACTIVE").length}`
+    );
+  }, [lots, bookings, pushWsEvent]);
+
   const value = useMemo(
     () => ({
       lots,
@@ -4038,6 +4702,15 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       calculateDurationAndQuote,
       releaseExpiredReservations,
       applyAdditionalCharges,
+      staffList,
+      addFacilityStaff,
+      updateFacilityStaff,
+      operatorManageReservation,
+      updateOperatorFacilityConfig,
+      exportOperatorReport,
+      wsConnected,
+      wsEvents,
+      triggerWsSyncPulse,
       resetDemoState,
     }),
     [
@@ -4100,6 +4773,15 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       calculateDurationAndQuote,
       releaseExpiredReservations,
       applyAdditionalCharges,
+      staffList,
+      addFacilityStaff,
+      updateFacilityStaff,
+      operatorManageReservation,
+      updateOperatorFacilityConfig,
+      exportOperatorReport,
+      wsConnected,
+      wsEvents,
+      triggerWsSyncPulse,
       resetDemoState,
     ]
   );

@@ -377,6 +377,7 @@ export interface Booking {
   checked_in_at?: string | null;
   checked_out_at?: string | null;
   overstay_fee_inr: number;
+  is_no_show?: boolean;
   created_at: string;
   payment: PaymentSummary;
   events?: BookingEventItem[];
@@ -483,3 +484,32 @@ export interface AuthUser {
   permissions: string[];
   sessionJti: string;
 }
+
+export interface FacilityStaffItem {
+  id: number;
+  lot_id: number;
+  lot_name: string;
+  employee_code: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  role_title: string;
+  shift_window: string;
+  assigned_zone: string;
+  is_on_duty: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface OperatorWebSocketEvent {
+  id: string;
+  event_type:
+    | "INITIAL_OPERATOR_SNAPSHOT"
+    | "SLOT_UPDATED"
+    | "BOOKING_UPDATED"
+    | "LOT_CONFIG_UPDATED"
+    | "OPERATOR_LIVE_SYNC";
+  summary: string;
+  timestamp: string;
+}
+
