@@ -2,7 +2,7 @@
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from app.models import BookingStatus, PaymentStatus, SlotStatus, SlotType, UserRole
 
 INDIAN_PLATE_REGEX = re.compile(
@@ -1060,8 +1060,20 @@ class PricingProposalResponse(BaseModel):
 
 
 class BookingAssistantRequest(BaseModel):
-    message: str = Field(..., min_length=2, max_length=500)
+    message: str = Field("", max_length=500)
+    query: Optional[str] = Field(None, max_length=500)
+    user_id: Optional[str] = Field(None, max_length=120)
     preferred_language: str = Field("AUTO", pattern="^(AUTO|en|hi)$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_message(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            msg = data.get("message") or data.get("query") or ""
+            data["message"] = str(msg)
+            if "query" not in data:
+                data["query"] = str(msg)
+        return data
 
 
 class StructuredSearchParams(BaseModel):
@@ -1115,9 +1127,20 @@ class BookingAssistantResponse(BaseModel):
 
 
 class OperatorAssistantRequest(BaseModel):
-    question: str = Field(..., min_length=2, max_length=500)
+    question: str = Field("", max_length=500)
+    query: Optional[str] = Field(None, max_length=500)
     lot_id: Optional[int] = Field(None, gt=0)
     days: int = Field(7, ge=1, le=90)
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_question(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            q = data.get("question") or data.get("query") or ""
+            data["question"] = str(q)
+            if "query" not in data:
+                data["query"] = str(q)
+        return data
 
 
 class SupportingMetric(BaseModel):

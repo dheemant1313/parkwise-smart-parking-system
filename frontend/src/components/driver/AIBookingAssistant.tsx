@@ -102,7 +102,9 @@ export function AIBookingAssistant({ onApplySlot }: AIBookingAssistantProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          message: textToSend,
           query: textToSend,
+          preferred_language: "AUTO",
           user_id: "USR-DRIVER-MOBILE",
         }),
       });
