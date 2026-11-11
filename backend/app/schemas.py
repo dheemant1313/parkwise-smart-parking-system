@@ -5,20 +5,172 @@ from typing import List, Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.models import BookingStatus, PaymentStatus, SlotStatus, SlotType, UserRole
 
-INDIAN_PLATE_REGEX = re.compile(r"^[A-Z]{2}[-\s]?[0-9]{1,2}[-\s]?[A-Z]{1,3}[-\s]?[0-9]{4}$")
+INDIAN_PLATE_REGEX = re.compile(
+    r"^[A-Z]{2}[-\s]?[0-9]{1,2}[-\s]?[A-Z]{1,3}[-\s]?[0-9]{4}$"
+)
+
+
+class VehicleItemResponse(BaseModel):
+    id: int
+    plate_number: str
+    model_name: str
+    size_class: str
+    dimensions_label: str
+    is_ev: bool
+    fastag_id: str
+    is_primary: bool
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class VehicleCreateRequest(BaseModel):
+    plate_number: str = Field(..., min_length=6, max_length=24)
+    model_name: str = Field(..., min_length=2, max_length=120)
+    size_class: str = Field("SEDAN", pattern="^(COMPACT|SEDAN|SUV_XL)$")
+    dimensions_label: str = Field("4.58m × 1.82m × 1.50m", max_length=64)
+    is_ev: bool = False
+    fastag_id: str = Field("FT-NPCI-ICICI-892104", max_length=60)
+    is_primary: bool = False
+
+    @field_validator("plate_number")
+    @classmethod
+    def validate_plate(cls, v: str) -> str:
+        normalized = v.strip().upper()
+        if not INDIAN_PLATE_REGEX.match(normalized):
+            raise ValueError(
+                "Invalid Indian vehicle registration format (e.g., MH-01-AB-1234 or DL-08-CAF-8921)"
+            )
+        return normalized
+
+
+class SessionItemResponse(BaseModel):
+    id: int
+    session_token_jti: str
+    ip_address: str
+    user_agent: str
+    device_label: str
+    is_revoked: bool
+    created_at: datetime
+    expires_at: datetime
+    last_active_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UserProfileResponse(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    phone: str
+    role: UserRole
+    vehicle_number: Optional[str] = None
+    fastag_id: Optional[str] = None
+    home_city: str = "New Delhi"
+    gst_number: Optional[str] = None
+    email_verified: bool
+    email_verification_token_preview: Optional[str] = None
+    fastag_auto_debit: bool = True
+    sms_receipts: bool = True
+    whatsapp_alerts: bool = True
+    accessible_priority: bool = False
+    is_active: bool = True
+    permissions: List[str] = []
+    vehicles: List[VehicleItemResponse] = []
+    created_at: Optional[datetime] = None
 
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    session_jti: Optional[str] = None
     role: UserRole
     full_name: str
     email: str
+    email_verified: bool = True
+    permissions: List[str] = []
+    user: Optional[UserProfileResponse] = None
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=4)
+    password: str = Field(..., min_length=4, max_length=128)
+    device_label: str = Field("Web Browser Session", max_length=120)
+
+
+class RegisterRequest(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=120)
+    email: EmailStr
+    phone: str = Field(..., min_length=10, max_length=20)
+    password: str = Field(..., min_length=8, max_length=128)
+    role: str = Field("DRIVER")
+    vehicle_number: Optional[str] = None
+    model_name: Optional[str] = "Tata Nexon EV Empowered+"
+    size_class: str = Field("SEDAN", pattern="^(COMPACT|SEDAN|SUV_XL)$")
+    is_ev: bool = False
+    home_city: str = Field("New Delhi", max_length=80)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long.")
+        if not any(ch.isdigit() for ch in v) or not any(ch.isalpha() for ch in v):
+            raise ValueError("Password must contain both letters and numbers.")
+        return v
+
+    @field_validator("vehicle_number")
+    @classmethod
+    def validate_optional_plate(cls, v: Optional[str]) -> Optional[str]:
+        if not v or not v.strip():
+            return None
+        normalized = v.strip().upper()
+        if not INDIAN_PLATE_REGEX.match(normalized):
+            raise ValueError(
+                "Invalid Indian RTO vehicle registration plate (e.g. DL-08-CAF-8921)."
+            )
+        return normalized
+
+
+class EmailVerificationRequest(BaseModel):
+    token: str = Field(..., min_length=6, max_length=128)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=6, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if not any(ch.isdigit() for ch in v) or not any(ch.isalpha() for ch in v):
+            raise ValueError("New password must contain both letters and numbers.")
+        return v
+
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=2, max_length=120)
+    phone: Optional[str] = Field(None, min_length=10, max_length=20)
+    home_city: Optional[str] = Field(None, max_length=80)
+    gst_number: Optional[str] = Field(None, max_length=32)
+    fastag_auto_debit: Optional[bool] = None
+    sms_receipts: Optional[bool] = None
+    whatsapp_alerts: Optional[bool] = None
+    accessible_priority: Optional[bool] = None
+    role: Optional[str] = None  # Explicitly checked to block unauthorized role escalation
+
+
+class AdminRoleUpdateRequest(BaseModel):
+    role: UserRole
+
+
+class AdminStatusUpdateRequest(BaseModel):
+    is_active: bool
+    reason: str = "Administrative status update"
 
 
 class SlotResponse(BaseModel):

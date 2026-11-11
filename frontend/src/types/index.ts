@@ -188,9 +188,51 @@ export interface AIPricingForecast {
 export interface AuditLogItem {
   id: number;
   actor_email: string;
-  actor_role: UserRole;
+  actor_role: UserRole | string;
   action: string;
   target_resource: string;
   details: string;
+  ip_address?: string;
   created_at: string;
+}
+
+export interface AuthSessionItem {
+  id: number;
+  session_token_jti: string;
+  ip_address: string;
+  user_agent: string;
+  device_label: string;
+  is_revoked: boolean;
+  created_at: string;
+  expires_at: string;
+  last_active_at: string;
+}
+
+export interface RolePermissionItem {
+  code: string;
+  name: string;
+  module: string;
+  description: string;
+}
+
+export interface RoleDefinition {
+  code: UserRole;
+  name: string;
+  description: string;
+  permissions: RolePermissionItem[];
+}
+
+export interface AuthUser {
+  id: number;
+  fullName: string;
+  email: string;
+  phone: string;
+  role: UserRole;
+  homeCity: string;
+  gstNumber?: string;
+  emailVerified: boolean;
+  emailVerificationTokenPreview?: string | null;
+  isActive: boolean;
+  permissions: string[];
+  sessionJti: string;
 }

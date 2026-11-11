@@ -11,6 +11,7 @@ import {
   Unlock,
 } from "lucide-react";
 import { useParkwise } from "@/lib/store";
+import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
 
 export default function GateManagementPage() {
   const { bookings, gateLogs, processGateScan } = useParkwise();
@@ -72,7 +73,12 @@ export default function GateManagementPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 space-y-8">
+    <ProtectedRouteGate
+      allowedRoles={["GATE_STAFF", "OPERATOR", "ADMIN"]}
+      requiredPermission="gate:scan"
+      applicationName="Gate Boom-Barrier Terminal"
+    >
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 space-y-8">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-center">
         <div>
@@ -335,5 +341,6 @@ export default function GateManagementPage() {
         </div>
       </div>
     </div>
+    </ProtectedRouteGate>
   );
 }

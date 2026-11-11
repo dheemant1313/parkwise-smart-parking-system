@@ -25,6 +25,7 @@ import {
 import { useParkwise } from "@/lib/store";
 import { formatINR } from "@/lib/utils";
 import { SlotStatus } from "@/types";
+import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
 
 export default function OperatorDashboardPage() {
   const {
@@ -67,8 +68,13 @@ export default function OperatorDashboardPage() {
   }, [activeLot]);
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 space-y-8">
-      {/* Header & Facility Selector */}
+    <ProtectedRouteGate
+      allowedRoles={["OPERATOR", "ADMIN"]}
+      requiredPermission="slot:override"
+      applicationName="Parking Operator SaaS Dashboard"
+    >
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 space-y-8">
+        {/* Header & Facility Selector */}
       <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-center">
         <div>
           <span className="text-xs font-bold uppercase tracking-widest text-brand-600">
@@ -350,5 +356,6 @@ export default function OperatorDashboardPage() {
         </div>
       </div>
     </div>
+    </ProtectedRouteGate>
   );
 }

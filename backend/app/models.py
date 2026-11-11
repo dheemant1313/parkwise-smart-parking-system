@@ -58,6 +58,48 @@ class PaymentStatus(str, enum.Enum):
     REFUNDED = "REFUNDED"
 
 
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(32), unique=True, index=True, nullable=False)
+    name = Column(String(80), nullable=False)
+    description = Column(Text, nullable=False)
+    is_system_role = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    role_permissions = relationship(
+        "RolePermission", back_populates="role", cascade="all, delete-orphan"
+    )
+
+
+class Permission(Base):
+    __tablename__ = "permissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(64), unique=True, index=True, nullable=False)
+    name = Column(String(120), nullable=False)
+    module = Column(String(40), nullable=False)
+    description = Column(Text, nullable=False)
+
+    role_permissions = relationship(
+        "RolePermission", back_populates="permission", cascade="all, delete-orphan"
+    )
+
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=False, index=True)
+    permission_id = Column(
+        Integer, ForeignKey("permissions.id"), nullable=False, index=True
+    )
+
+    role = relationship("Role", back_populates="role_permissions")
+    permission = relationship("Permission", back_populates="role_permissions")
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -69,10 +111,67 @@ class User(Base):
     role = Column(Enum(UserRole), default=UserRole.DRIVER, nullable=False)
     vehicle_number = Column(String(30), nullable=True)
     fastag_id = Column(String(60), nullable=True)
+    home_city = Column(String(80), default="New Delhi", nullable=False)
+    gst_number = Column(String(32), nullable=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    email_verification_token = Column(String(128), nullable=True, index=True)
+    password_reset_token = Column(String(128), nullable=True, index=True)
+    reset_token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    fastag_auto_debit = Column(Boolean, default=True, nullable=False)
+    sms_receipts = Column(Boolean, default=True, nullable=False)
+    whatsapp_alerts = Column(Boolean, default=True, nullable=False)
+    accessible_priority = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    deactivated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
 
     bookings = relationship("Booking", back_populates="user")
+    vehicles = relationship(
+        "Vehicle", back_populates="user", cascade="all, delete-orphan"
+    )
+    sessions = relationship(
+        "UserSession", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_token_jti = Column(String(64), unique=True, index=True, nullable=False)
+    ip_address = Column(String(64), default="127.0.0.1", nullable=False)
+    user_agent = Column(
+        String(255), default="Parkwise-Enterprise-Client/2.4", nullable=False
+    )
+    device_label = Column(
+        String(120), default="Web Browser Session", nullable=False
+    )
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    last_active_at = Column(DateTime(timezone=True), default=utc_now)
+
+    user = relationship("User", back_populates="sessions")
+
+
+class Vehicle(Base):
+    __tablename__ = "vehicles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    plate_number = Column(String(30), index=True, nullable=False)
+    model_name = Column(String(120), nullable=False)
+    size_class = Column(String(24), default="SEDAN", nullable=False)
+    dimensions_label = Column(
+        String(64), default="4.58m × 1.82m × 1.50m", nullable=False
+    )
+    is_ev = Column(Boolean, default=False, nullable=False)
+    fastag_id = Column(String(60), default="FT-NPCI-ICICI-892104", nullable=False)
+    is_primary = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    user = relationship("User", back_populates="vehicles")
 
 
 class ParkingLot(Base):
@@ -201,4 +300,5 @@ class AuditLog(Base):
     action = Column(String(120), nullable=False)
     target_resource = Column(String(120), nullable=False)
     details = Column(Text, nullable=True)
+    ip_address = Column(String(64), default="127.0.0.1", nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)

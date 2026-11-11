@@ -9,6 +9,7 @@ import {
   Building2,
   CarFront,
   Cpu,
+  KeyRound,
   Menu,
   QrCode,
   RotateCcw,
@@ -32,14 +33,20 @@ const CONSOLE_LINKS = [
   { href: "/operator", label: "Operator SaaS", icon: Building2 },
   { href: "/gate", label: "Gate Terminal", icon: QrCode },
   { href: "/admin", label: "Admin Console", icon: ShieldCheck },
+  { href: "/auth", label: "Auth & RBAC", icon: KeyRound },
 ];
 
 const ROLES: UserRole[] = ["DRIVER", "OPERATOR", "GATE_STAFF", "ADMIN"];
 
 export function Navbar() {
   const pathname = usePathname();
-  const { activeRole, setActiveRole, backendConnected, resetDemoState } =
-    useParkwise();
+  const {
+    authUser,
+    activeRole,
+    setActiveRole,
+    backendConnected,
+    resetDemoState,
+  } = useParkwise();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -78,6 +85,15 @@ export function Navbar() {
                 ? "FastAPI + SQLAlchemy Live"
                 : "Transactional Engine Active"}
             </span>
+            <Link
+              href="/auth"
+              className="inline-flex items-center gap-1 rounded bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-blue-300 hover:bg-slate-700 hover:text-white"
+            >
+              <KeyRound className="h-2.5 w-2.5" />
+              <span>
+                {authUser ? `${authUser.email} (${authUser.role})` : "Sign In"}
+              </span>
+            </Link>
             <div className="flex items-center gap-1">
               <span className="text-[10px] text-slate-400">RBAC:</span>
               <select

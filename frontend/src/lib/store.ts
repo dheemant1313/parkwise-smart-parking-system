@@ -11,6 +11,8 @@ import React, {
 import {
   AIPricingForecast,
   AuditLogItem,
+  AuthSessionItem,
+  AuthUser,
   Booking,
   DriverNotification,
   DriverProfile,
@@ -18,6 +20,7 @@ import {
   GateLogEntry,
   ParkingLot,
   ParkingSlot,
+  RoleDefinition,
   SlotRecommendation,
   SlotStatus,
   SlotType,
@@ -379,6 +382,287 @@ export interface RecommendationCriteria {
   maxHourlyBudgetInr?: number;
 }
 
+export interface RegisterUserInput {
+  fullName: string;
+  email: string;
+  phone: string;
+  password: string;
+  role: string;
+  vehicleNumber?: string;
+  modelName?: string;
+  sizeClass?: VehicleSize;
+  isEv?: boolean;
+  homeCity?: string;
+}
+
+const ROLE_DEFINITIONS_DEFAULT: RoleDefinition[] = [
+  {
+    code: "DRIVER",
+    name: "Driver Mobility User",
+    description:
+      "Search, reserve, pay, and manage vehicles and cryptographic QR gate passes",
+    permissions: [
+      {
+        code: "booking:create",
+        name: "Create Parking Reservation",
+        module: "DRIVER",
+        description: "Reserve available parking bays with transactional locks",
+      },
+      {
+        code: "booking:read",
+        name: "Read Booking Records",
+        module: "DRIVER",
+        description: "Inspect reservation details, QR passes, and GST invoices",
+      },
+      {
+        code: "booking:cancel",
+        name: "Cancel Reservation",
+        module: "DRIVER",
+        description:
+          "Cancel pre-check-in reservations and initiate Razorpay refund",
+      },
+      {
+        code: "booking:extend",
+        name: "Extend Active Parking",
+        module: "DRIVER",
+        description: "Extend reservation duration with conflict verification",
+      },
+      {
+        code: "vehicle:manage",
+        name: "Manage Registered Vehicles",
+        module: "DRIVER",
+        description: "Add, update, and remove RTO vehicles and FASTag tags",
+      },
+      {
+        code: "profile:manage",
+        name: "Manage Account Profile",
+        module: "AUTH",
+        description: "Update personal profile, GSTIN, and notification settings",
+      },
+    ],
+  },
+  {
+    code: "OPERATOR",
+    name: "Parking Facility Operator",
+    description:
+      "Manage bay inventory, AI surge pricing, and multi-floor facility telemetry",
+    permissions: [
+      {
+        code: "booking:read",
+        name: "Read Booking Records",
+        module: "DRIVER",
+        description: "Inspect reservation details and facility occupancy",
+      },
+      {
+        code: "slot:override",
+        name: "Override Bay Status",
+        module: "OPERATOR",
+        description: "Mark parking bays Available, Occupied, or Maintenance",
+      },
+      {
+        code: "pricing:surge",
+        name: "Configure Dynamic Surge",
+        module: "OPERATOR",
+        description: "Enable dynamic pricing and adjust surge multipliers",
+      },
+      {
+        code: "ai:forecast",
+        name: "Run AI Occupancy Forecast",
+        module: "OPERATOR",
+        description: "Execute XGBoost demand forecasting and tariff inference",
+      },
+      {
+        code: "lot:manage",
+        name: "Manage Parking Facility",
+        module: "OPERATOR",
+        description: "Manage multi-floor parking facility telemetry",
+      },
+      {
+        code: "profile:manage",
+        name: "Manage Account Profile",
+        module: "AUTH",
+        description: "Update personal profile and notification settings",
+      },
+    ],
+  },
+  {
+    code: "GATE_STAFF",
+    name: "Gate Terminal Controller",
+    description:
+      "Operate ANPR optical cameras, QR scanners, and boom-barrier lanes",
+    permissions: [
+      {
+        code: "gate:scan",
+        name: "Process Gate QR/ANPR Scan",
+        module: "GATE",
+        description:
+          "Verify HMAC QR signatures and optical ANPR plates at barrier",
+      },
+      {
+        code: "gate:logs",
+        name: "Inspect Gate Telemetry Logs",
+        module: "GATE",
+        description: "View entry, exit, and denied boom-barrier events",
+      },
+      {
+        code: "gate:override",
+        name: "Manual Barrier Override",
+        module: "GATE",
+        description: "Authorize emergency or manual boom-barrier actuation",
+      },
+      {
+        code: "booking:read",
+        name: "Read Booking Records",
+        module: "DRIVER",
+        description: "Inspect reservation validity at gate lane",
+      },
+      {
+        code: "profile:manage",
+        name: "Manage Account Profile",
+        module: "AUTH",
+        description: "Update terminal operator profile",
+      },
+    ],
+  },
+  {
+    code: "ADMIN",
+    name: "Platform Administrator",
+    description:
+      "Full national grid governance, RBAC administration, and security audits",
+    permissions: [
+      {
+        code: "booking:create",
+        name: "Create Parking Reservation",
+        module: "DRIVER",
+        description: "Full reservation access",
+      },
+      {
+        code: "slot:override",
+        name: "Override Bay Status",
+        module: "OPERATOR",
+        description: "Override any facility bay status",
+      },
+      {
+        code: "pricing:surge",
+        name: "Configure Dynamic Surge",
+        module: "OPERATOR",
+        description: "Configure national dynamic pricing policies",
+      },
+      {
+        code: "gate:scan",
+        name: "Process Gate QR/ANPR Scan",
+        module: "GATE",
+        description: "Operate any gate terminal",
+      },
+      {
+        code: "admin:users",
+        name: "Manage Platform Users",
+        module: "ADMIN",
+        description: "Inspect users, verify KYC, and manage platform accounts",
+      },
+      {
+        code: "admin:roles",
+        name: "Assign RBAC Roles",
+        module: "ADMIN",
+        description: "Modify user roles and enforce least-privilege access",
+      },
+      {
+        code: "admin:audit",
+        name: "Inspect Security Audit Ledger",
+        module: "ADMIN",
+        description: "Read immutable security and operational audit logs",
+      },
+      {
+        code: "admin:deactivate",
+        name: "Deactivate / Reactivate Accounts",
+        module: "ADMIN",
+        description: "Suspend or restore user accounts and revoke sessions",
+      },
+    ],
+  },
+];
+
+const ROLE_DEFAULT_USERS: Record<UserRole, AuthUser> = {
+  DRIVER: {
+    id: 1,
+    fullName: "Aarav Sharma",
+    email: "driver@parkwise.in",
+    phone: "+91-9811045210",
+    role: "DRIVER",
+    homeCity: "New Delhi",
+    gstNumber: "07AABCP9981K1Z5",
+    emailVerified: true,
+    emailVerificationTokenPreview: null,
+    isActive: true,
+    permissions: ROLE_DEFINITIONS_DEFAULT[0].permissions.map((p) => p.code),
+    sessionJti: "sess_driver_998120a4b2",
+  },
+  OPERATOR: {
+    id: 2,
+    fullName: "Vikramaditya Nair (BKC Operations)",
+    email: "operator@parkwise.in",
+    phone: "+91-9820194812",
+    role: "OPERATOR",
+    homeCity: "Mumbai",
+    emailVerified: true,
+    emailVerificationTokenPreview: null,
+    isActive: true,
+    permissions: ROLE_DEFINITIONS_DEFAULT[1].permissions.map((p) => p.code),
+    sessionJti: "sess_operator_774190c3d1",
+  },
+  GATE_STAFF: {
+    id: 3,
+    fullName: "Rajeshwari Menon (Gate Terminal 01)",
+    email: "gate@parkwise.in",
+    phone: "+91-9845091823",
+    role: "GATE_STAFF",
+    homeCity: "New Delhi",
+    emailVerified: true,
+    emailVerificationTokenPreview: null,
+    isActive: true,
+    permissions: ROLE_DEFINITIONS_DEFAULT[2].permissions.map((p) => p.code),
+    sessionJti: "sess_gate_552019e8f4",
+  },
+  ADMIN: {
+    id: 4,
+    fullName: "Dheemant Setia (Principal Admin)",
+    email: "admin@parkwise.in",
+    phone: "+91-9910088211",
+    role: "ADMIN",
+    homeCity: "New Delhi",
+    emailVerified: true,
+    emailVerificationTokenPreview: null,
+    isActive: true,
+    permissions: ROLE_DEFINITIONS_DEFAULT[3].permissions.map((p) => p.code),
+    sessionJti: "sess_admin_110294a9c7",
+  },
+};
+
+const INITIAL_SESSIONS: AuthSessionItem[] = [
+  {
+    id: 1,
+    session_token_jti: "sess_driver_998120a4b2",
+    ip_address: "127.0.0.1",
+    user_agent: "Parkwise-Enterprise-Web/2.5 (HttpOnly Cookie + JWT)",
+    device_label: "Primary Workstation • Chrome Windows",
+    is_revoked: false,
+    created_at: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+    expires_at: new Date(Date.now() + 23 * 3600 * 1000).toISOString(),
+    last_active_at: new Date().toISOString(),
+  },
+  {
+    id: 2,
+    session_token_jti: "sess_mobile_441092b8e1",
+    ip_address: "103.21.124.88",
+    user_agent: "Parkwise-iOS-App/2.5 (iPhone 16 Pro)",
+    device_label: "iPhone 16 Pro • FASTag Companion",
+    is_revoked: false,
+    created_at: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
+    expires_at: new Date(Date.now() + 20 * 3600 * 1000).toISOString(),
+    last_active_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+  },
+];
+
 interface ParkwiseContextValue {
   lots: ParkingLot[];
   bookings: Booking[];
@@ -387,9 +671,27 @@ interface ParkwiseContextValue {
   vehicles: DriverVehicle[];
   profile: DriverProfile;
   notifications: DriverNotification[];
+  authUser: AuthUser | null;
+  sessions: AuthSessionItem[];
+  roleDefinitions: RoleDefinition[];
   activeRole: UserRole;
   setActiveRole: (role: UserRole) => void;
   backendConnected: boolean;
+  loginUser: (
+    email: string,
+    password: string,
+    deviceLabel?: string
+  ) => Promise<AuthUser>;
+  registerUser: (input: RegisterUserInput) => Promise<AuthUser>;
+  logoutUser: () => Promise<void>;
+  verifyEmailToken: (token: string) => Promise<void>;
+  requestPasswordReset: (
+    email: string
+  ) => Promise<{ resetToken: string; expiresInMinutes: number }>;
+  confirmPasswordReset: (token: string, newPassword: string) => Promise<void>;
+  revokeSession: (sessionId: number) => Promise<void>;
+  deactivateAccount: () => Promise<void>;
+  hasPermission: (permissionCode: string) => boolean;
   createBookingAndVerifyPayment: (input: CreateBookingInput) => Promise<Booking>;
   cancelBooking: (bookingReference: string) => Promise<Booking>;
   extendBooking: (
@@ -457,8 +759,20 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<DriverNotification[]>(
     INITIAL_NOTIFICATIONS
   );
-  const [activeRole, setActiveRole] = useState<UserRole>("DRIVER");
+  const [activeRole, setActiveRoleState] = useState<UserRole>("DRIVER");
+  const [authUser, setAuthUser] = useState<AuthUser | null>(
+    ROLE_DEFAULT_USERS.DRIVER
+  );
+  const [sessions, setSessions] = useState<AuthSessionItem[]>(INITIAL_SESSIONS);
+  const [roleDefinitions] = useState<RoleDefinition[]>(
+    ROLE_DEFINITIONS_DEFAULT
+  );
   const [backendConnected, setBackendConnected] = useState<boolean>(false);
+
+  const setActiveRole = useCallback((role: UserRole) => {
+    setActiveRoleState(role);
+    setAuthUser(ROLE_DEFAULT_USERS[role]);
+  }, []);
 
   useEffect(() => {
     try {
@@ -1369,7 +1683,444 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
     setVehicles(INITIAL_VEHICLES);
     setProfile(INITIAL_PROFILE);
     setNotifications(INITIAL_NOTIFICATIONS);
+    setActiveRoleState("DRIVER");
+    setAuthUser(ROLE_DEFAULT_USERS.DRIVER);
+    setSessions(INITIAL_SESSIONS);
   }, []);
+
+  const hasPermission = useCallback(
+    (permissionCode: string): boolean => {
+      if (!authUser || !authUser.isActive) return false;
+      return authUser.permissions.includes(permissionCode);
+    },
+    [authUser]
+  );
+
+  const loginUser = useCallback(
+    async (
+      email: string,
+      password: string,
+      deviceLabel = "Web Browser Session • HttpOnly Cookie"
+    ): Promise<AuthUser> => {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail || password.length < 4) {
+        throw new Error("Please enter a valid email address and password.");
+      }
+
+      if (backendConnected) {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            email: normalizedEmail,
+            password,
+            device_label: deviceLabel,
+          }),
+        });
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => null);
+          throw new Error(
+            errJson?.detail || `Authentication failed (${res.status}).`
+          );
+        }
+        const data = await res.json();
+        const role = data.role as UserRole;
+        const loggedUser: AuthUser = {
+          id: data.user?.id || 1,
+          fullName: data.full_name,
+          email: data.email,
+          phone: data.user?.phone || "+91-9811045210",
+          role,
+          homeCity: data.user?.home_city || "New Delhi",
+          gstNumber: data.user?.gst_number,
+          emailVerified: Boolean(data.email_verified),
+          emailVerificationTokenPreview:
+            data.user?.email_verification_token_preview || null,
+          isActive: true,
+          permissions: data.permissions || [],
+          sessionJti: data.session_jti || `sess_${Date.now()}`,
+        };
+        setAuthUser(loggedUser);
+        setActiveRoleState(role);
+        const newSess: AuthSessionItem = {
+          id: sessions.length + 1,
+          session_token_jti: loggedUser.sessionJti,
+          ip_address: "127.0.0.1",
+          user_agent: "Parkwise-Enterprise-Web/2.5 (HttpOnly Cookie)",
+          device_label: deviceLabel,
+          is_revoked: false,
+          created_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          last_active_at: new Date().toISOString(),
+        };
+        setSessions([newSess, ...sessions]);
+        return loggedUser;
+      }
+
+      // Deterministic local RBAC verification when backend is offline
+      let matchedRole: UserRole = "DRIVER";
+      if (normalizedEmail.startsWith("admin")) matchedRole = "ADMIN";
+      else if (normalizedEmail.startsWith("operator")) matchedRole = "OPERATOR";
+      else if (normalizedEmail.startsWith("gate")) matchedRole = "GATE_STAFF";
+
+      const preset = ROLE_DEFAULT_USERS[matchedRole];
+      const jti = `sess_${Date.now().toString(16)}`;
+      const nextUser: AuthUser = {
+        ...preset,
+        email: normalizedEmail,
+        sessionJti: jti,
+      };
+      setAuthUser(nextUser);
+      setActiveRoleState(matchedRole);
+
+      const newSess: AuthSessionItem = {
+        id: sessions.length + 1,
+        session_token_jti: jti,
+        ip_address: "127.0.0.1",
+        user_agent: "Parkwise-Enterprise-Web/2.5 (HttpOnly Cookie)",
+        device_label: deviceLabel,
+        is_revoked: false,
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+        last_active_at: new Date().toISOString(),
+      };
+      setSessions([newSess, ...sessions]);
+
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: normalizedEmail,
+        actor_role: matchedRole,
+        action: "AUTH_LOGIN_SUCCESS",
+        target_resource: `Session ${jti}`,
+        details: `Authenticated ${matchedRole} session with PBKDF2-HMAC-SHA256 & HttpOnly cookie.`,
+        created_at: new Date().toISOString(),
+      };
+      setAuditLogs([nextAudit, ...auditLogs]);
+      return nextUser;
+    },
+    [backendConnected, sessions, auditLogs]
+  );
+
+  const registerUser = useCallback(
+    async (input: RegisterUserInput): Promise<AuthUser> => {
+      const requestedRole = (input.role || "DRIVER").trim().toUpperCase();
+      if (requestedRole === "ADMIN") {
+        const escAudit: AuditLogItem = {
+          id: auditLogs.length + 1,
+          actor_email: input.email.toLowerCase(),
+          actor_role: "UNAUTHENTICATED",
+          action: "ROLE_ESCALATION_BLOCKED",
+          target_resource: "POST /api/v1/auth/register",
+          details:
+            "Blocked unauthorized attempt to self-register as ADMIN.",
+          created_at: new Date().toISOString(),
+        };
+        setAuditLogs([escAudit, ...auditLogs]);
+        throw new Error(
+          "Unauthorized role escalation: cannot self-register as ADMIN. Platform Administrator accounts require existing ADMIN authorization."
+        );
+      }
+
+      if (
+        input.password.length < 8 ||
+        !/[0-9]/.test(input.password) ||
+        !/[a-zA-Z]/.test(input.password)
+      ) {
+        throw new Error(
+          "Password must be at least 8 characters and include both letters and numbers."
+        );
+      }
+
+      if (input.vehicleNumber && !isValidIndianPlate(input.vehicleNumber)) {
+        throw new Error(
+          "Invalid Indian RTO vehicle registration plate (e.g., DL-08-CAF-8921)."
+        );
+      }
+
+      if (backendConnected) {
+        const res = await fetch(`${API_BASE}/auth/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            full_name: input.fullName,
+            email: input.email,
+            phone: input.phone,
+            password: input.password,
+            role: requestedRole,
+            vehicle_number: input.vehicleNumber || undefined,
+            model_name: input.modelName || "Tata Nexon EV Empowered+",
+            size_class: input.sizeClass || "SEDAN",
+            is_ev: Boolean(input.isEv),
+            home_city: input.homeCity || "New Delhi",
+          }),
+        });
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => null);
+          throw new Error(
+            typeof errJson?.detail === "string"
+              ? errJson.detail
+              : `Registration rejected (${res.status}).`
+          );
+        }
+        const data = await res.json();
+        const assignedRole = data.role as UserRole;
+        const createdUser: AuthUser = {
+          id: data.user?.id || Date.now(),
+          fullName: data.full_name,
+          email: data.email,
+          phone: input.phone,
+          role: assignedRole,
+          homeCity: input.homeCity || "New Delhi",
+          emailVerified: Boolean(data.email_verified),
+          emailVerificationTokenPreview:
+            data.user?.email_verification_token_preview ||
+            `pw_verify_${Date.now().toString(16)}`,
+          isActive: true,
+          permissions: data.permissions || [],
+          sessionJti: data.session_jti || `sess_reg_${Date.now()}`,
+        };
+        setAuthUser(createdUser);
+        setActiveRoleState(assignedRole);
+        return createdUser;
+      }
+
+      const assignedRole = requestedRole as UserRole;
+      const roleDef =
+        ROLE_DEFINITIONS_DEFAULT.find((r) => r.code === assignedRole) ||
+        ROLE_DEFINITIONS_DEFAULT[0];
+      const verifyToken = `pw_verify_${Date.now().toString(16)}`;
+      const jti = `sess_reg_${Date.now().toString(16)}`;
+
+      const createdUser: AuthUser = {
+        id: Date.now(),
+        fullName: input.fullName.trim(),
+        email: input.email.trim().toLowerCase(),
+        phone: input.phone.trim(),
+        role: assignedRole,
+        homeCity: input.homeCity || "New Delhi",
+        emailVerified: false,
+        emailVerificationTokenPreview: verifyToken,
+        isActive: true,
+        permissions: roleDef.permissions.map((p) => p.code),
+        sessionJti: jti,
+      };
+      setAuthUser(createdUser);
+      setActiveRoleState(assignedRole);
+      setProfile({
+        ...profile,
+        fullName: createdUser.fullName,
+        email: createdUser.email,
+        phone: createdUser.phone,
+        homeCity: createdUser.homeCity,
+      });
+
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: createdUser.email,
+        actor_role: assignedRole,
+        action: "USER_REGISTERED",
+        target_resource: `User ${createdUser.email}`,
+        details: `Registered ${assignedRole} account. Issued verification token ${verifyToken}.`,
+        created_at: new Date().toISOString(),
+      };
+      setAuditLogs([nextAudit, ...auditLogs]);
+      return createdUser;
+    },
+    [backendConnected, auditLogs, profile]
+  );
+
+  const logoutUser = useCallback(async () => {
+    if (backendConnected) {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      }).catch(() => null);
+    }
+    const currentEmail = authUser?.email || "driver@parkwise.in";
+    const currentRole = authUser?.role || activeRole;
+    const currentJti = authUser?.sessionJti;
+
+    if (currentJti) {
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.session_token_jti === currentJti ? { ...s, is_revoked: true } : s
+        )
+      );
+    }
+    setAuthUser(null);
+
+    const nextAudit: AuditLogItem = {
+      id: auditLogs.length + 1,
+      actor_email: currentEmail,
+      actor_role: currentRole,
+      action: "AUTH_LOGOUT",
+      target_resource: currentJti || "active_cookie_session",
+      details: "Revoked session JTI and cleared HttpOnly session cookie.",
+      created_at: new Date().toISOString(),
+    };
+    setAuditLogs([nextAudit, ...auditLogs]);
+  }, [backendConnected, authUser, activeRole, auditLogs]);
+
+  const verifyEmailToken = useCallback(
+    async (token: string) => {
+      const cleaned = token.trim();
+      if (!cleaned) {
+        throw new Error("Verification token is required.");
+      }
+      if (backendConnected) {
+        const res = await fetch(`${API_BASE}/auth/verify-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: cleaned }),
+        });
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => null);
+          throw new Error(
+            errJson?.detail || "Invalid or expired verification token."
+          );
+        }
+      }
+      if (authUser) {
+        setAuthUser({
+          ...authUser,
+          emailVerified: true,
+          emailVerificationTokenPreview: null,
+        });
+      }
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || profile.email,
+        actor_role: authUser?.role || activeRole,
+        action: "EMAIL_VERIFIED",
+        target_resource: cleaned,
+        details: "Verified primary email ownership via cryptographic token.",
+        created_at: new Date().toISOString(),
+      };
+      setAuditLogs([nextAudit, ...auditLogs]);
+    },
+    [backendConnected, authUser, profile.email, activeRole, auditLogs]
+  );
+
+  const requestPasswordReset = useCallback(
+    async (
+      email: string
+    ): Promise<{ resetToken: string; expiresInMinutes: number }> => {
+      const cleaned = email.trim().toLowerCase();
+      if (!cleaned) {
+        throw new Error("Please enter your registered email address.");
+      }
+      if (backendConnected) {
+        const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: cleaned }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return {
+            resetToken: data.reset_token,
+            expiresInMinutes: data.expires_in_minutes || 15,
+          };
+        }
+      }
+      const generated = `pw_reset_${Date.now().toString(16)}`;
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: cleaned,
+        actor_role: activeRole,
+        action: "PASSWORD_RESET_REQUESTED",
+        target_resource: cleaned,
+        details: `Issued 15-minute password reset token (${generated}).`,
+        created_at: new Date().toISOString(),
+      };
+      setAuditLogs([nextAudit, ...auditLogs]);
+      return { resetToken: generated, expiresInMinutes: 15 };
+    },
+    [backendConnected, activeRole, auditLogs]
+  );
+
+  const confirmPasswordReset = useCallback(
+    async (token: string, newPassword: string) => {
+      if (
+        newPassword.length < 8 ||
+        !/[0-9]/.test(newPassword) ||
+        !/[a-zA-Z]/.test(newPassword)
+      ) {
+        throw new Error(
+          "New password must be at least 8 characters and include both letters and numbers."
+        );
+      }
+      if (backendConnected) {
+        const res = await fetch(`${API_BASE}/auth/reset-password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token: token.trim(),
+            new_password: newPassword,
+          }),
+        });
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => null);
+          throw new Error(
+            errJson?.detail || "Invalid or expired password reset token."
+          );
+        }
+      }
+      setSessions((prev) => prev.map((s) => ({ ...s, is_revoked: true })));
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || profile.email,
+        actor_role: authUser?.role || activeRole,
+        action: "PASSWORD_RESET_COMPLETED",
+        target_resource: token.trim(),
+        details:
+          "Password hash updated with PBKDF2-SHA256; all existing sessions revoked.",
+        created_at: new Date().toISOString(),
+      };
+      setAuditLogs([nextAudit, ...auditLogs]);
+    },
+    [backendConnected, authUser, profile.email, activeRole, auditLogs]
+  );
+
+  const revokeSession = useCallback(
+    async (sessionId: number) => {
+      const target = sessions.find((s) => s.id === sessionId);
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, is_revoked: true } : s))
+      );
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || profile.email,
+        actor_role: authUser?.role || activeRole,
+        action: "SESSION_REVOKED",
+        target_resource: target?.session_token_jti || `Session #${sessionId}`,
+        details: `Revoked active device session (${target?.device_label || "Web"}).`,
+        created_at: new Date().toISOString(),
+      };
+      setAuditLogs([nextAudit, ...auditLogs]);
+    },
+    [sessions, authUser, profile.email, activeRole, auditLogs]
+  );
+
+  const deactivateAccount = useCallback(async () => {
+    const email = authUser?.email || profile.email;
+    const role = authUser?.role || activeRole;
+    setSessions((prev) => prev.map((s) => ({ ...s, is_revoked: true })));
+    setAuthUser(null);
+    const nextAudit: AuditLogItem = {
+      id: auditLogs.length + 1,
+      actor_email: email,
+      actor_role: role,
+      action: "ACCOUNT_DEACTIVATED",
+      target_resource: email,
+      details:
+        "Account deactivated; all active sessions revoked and HttpOnly cookie cleared.",
+      created_at: new Date().toISOString(),
+    };
+    setAuditLogs([nextAudit, ...auditLogs]);
+  }, [authUser, profile.email, activeRole, auditLogs]);
 
   const value = useMemo(
     () => ({
@@ -1380,9 +2131,21 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       vehicles,
       profile,
       notifications,
+      authUser,
+      sessions,
+      roleDefinitions,
       activeRole,
       setActiveRole,
       backendConnected,
+      loginUser,
+      registerUser,
+      logoutUser,
+      verifyEmailToken,
+      requestPasswordReset,
+      confirmPasswordReset,
+      revokeSession,
+      deactivateAccount,
+      hasPermission,
       createBookingAndVerifyPayment,
       cancelBooking,
       extendBooking,
@@ -1406,8 +2169,21 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       vehicles,
       profile,
       notifications,
+      authUser,
+      sessions,
+      roleDefinitions,
       activeRole,
+      setActiveRole,
       backendConnected,
+      loginUser,
+      registerUser,
+      logoutUser,
+      verifyEmailToken,
+      requestPasswordReset,
+      confirmPasswordReset,
+      revokeSession,
+      deactivateAccount,
+      hasPermission,
       createBookingAndVerifyPayment,
       cancelBooking,
       extendBooking,

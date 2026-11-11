@@ -8,6 +8,7 @@ import {
   CalendarClock,
   CarFront,
   Compass,
+  KeyRound,
   MapPin,
   UserCheck,
 } from "lucide-react";
@@ -49,6 +50,12 @@ export function DriverSubNav() {
       label: "Vehicles & Driver Profile",
       badge: String(vehicles.length),
       icon: UserCheck,
+      exact: true,
+    },
+    {
+      href: "/auth",
+      label: "Auth & Security",
+      icon: KeyRound,
       exact: true,
     },
   ];

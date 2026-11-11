@@ -1,7 +1,7 @@
-"""Idempotent Database Seeder with Realistic Indian Metro Smart Parking Infrastructure."""
+"""Idempotent Database Seeder with Realistic Indian Metro Smart Parking Infrastructure, RBAC Roles, Permissions & Vehicles."""
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from app.auth import hash_password
+from app.auth import ROLE_PERMISSIONS_MAP, hash_password
 from app.models import (
     AuditLog,
     Booking,
@@ -11,10 +11,14 @@ from app.models import (
     ParkingSlot,
     Payment,
     PaymentStatus,
+    Permission,
+    Role,
+    RolePermission,
     SlotStatus,
     SlotType,
     User,
     UserRole,
+    Vehicle,
 )
 from app.services.booking_service import compute_qr_signature
 
@@ -22,6 +26,61 @@ from app.services.booking_service import compute_qr_signature
 def seed_initial_data(db: Session) -> None:
     if db.query(ParkingLot).count() > 0:
         return
+
+    # 0. Seed Roles, Permissions, and RolePermission mappings
+    permission_definitions = [
+        ("booking:create", "Create Parking Reservation", "DRIVER", "Reserve available parking bays with transactional locks"),
+        ("booking:read", "Read Booking Records", "DRIVER", "Inspect reservation details, QR passes, and GST invoices"),
+        ("booking:cancel", "Cancel Reservation", "DRIVER", "Cancel pre-check-in reservations and initiate Razorpay refund"),
+        ("booking:extend", "Extend Active Parking", "DRIVER", "Extend reservation duration with conflict verification"),
+        ("vehicle:manage", "Manage Registered Vehicles", "DRIVER", "Add, update, and remove RTO vehicles and FASTag tags"),
+        ("profile:manage", "Manage Account Profile", "AUTH", "Update personal profile, GSTIN, and notification settings"),
+        ("slot:override", "Override Bay Status", "OPERATOR", "Mark parking bays Available, Occupied, or Maintenance"),
+        ("pricing:surge", "Configure Dynamic Surge", "OPERATOR", "Enable dynamic pricing and adjust surge multipliers"),
+        ("ai:forecast", "Run AI Occupancy Forecast", "OPERATOR", "Execute XGBoost demand forecasting and tariff inference"),
+        ("lot:manage", "Manage Parking Facility", "OPERATOR", "Manage multi-floor parking facility telemetry"),
+        ("gate:scan", "Process Gate QR/ANPR Scan", "GATE", "Verify HMAC QR signatures and optical ANPR plates at barrier"),
+        ("gate:logs", "Inspect Gate Telemetry Logs", "GATE", "View entry, exit, and denied boom-barrier events"),
+        ("gate:override", "Manual Barrier Override", "GATE", "Authorize emergency or manual boom-barrier actuation"),
+        ("admin:users", "Manage Platform Users", "ADMIN", "Inspect users, verify KYC, and manage platform accounts"),
+        ("admin:roles", "Assign RBAC Roles", "ADMIN", "Modify user roles and enforce least-privilege access"),
+        ("admin:audit", "Inspect Security Audit Ledger", "ADMIN", "Read immutable security and operational audit logs"),
+        ("admin:deactivate", "Deactivate / Reactivate Accounts", "ADMIN", "Suspend or restore user accounts and revoke sessions"),
+    ]
+
+    perm_by_code = {}
+    for code, name, module, desc in permission_definitions:
+        p = Permission(code=code, name=name, module=module, description=desc)
+        db.add(p)
+        db.flush()
+        perm_by_code[code] = p
+
+    role_definitions = [
+        (UserRole.DRIVER, "Driver Mobility User", "Search, reserve, pay, and manage vehicles and QR gate passes"),
+        (UserRole.OPERATOR, "Parking Facility Operator", "Manage bay inventory, AI surge pricing, and facility revenue"),
+        (UserRole.GATE_STAFF, "Gate Terminal Controller", "Operate ANPR cameras, QR scanners, and boom-barrier lanes"),
+        (UserRole.ADMIN, "Platform Administrator", "Full national grid governance, RBAC administration, and security audits"),
+    ]
+
+    for r_enum, r_name, r_desc in role_definitions:
+        role_row = Role(
+            code=r_enum.value,
+            name=r_name,
+            description=r_desc,
+            is_system_role=True,
+        )
+        db.add(role_row)
+        db.flush()
+        for p_code in ROLE_PERMISSIONS_MAP.get(r_enum, []):
+            if p_code in perm_by_code:
+                db.add(
+                    RolePermission(
+                        role_id=role_row.id,
+                        permission_id=perm_by_code[p_code].id,
+                    )
+                )
+
+    db.flush()
 
     # 1. Seed Enterprise RBAC Users
     driver = User(
@@ -32,6 +91,10 @@ def seed_initial_data(db: Session) -> None:
         role=UserRole.DRIVER,
         vehicle_number="DL-08-CAF-8921",
         fastag_id="FT-NPCI-ICICI-892104",
+        home_city="New Delhi",
+        gst_number="07AABCP9981K1Z5",
+        email_verified=True,
+        email_verification_token=None,
     )
     operator = User(
         full_name="Vikramaditya Nair (BKC Operations)",
@@ -39,6 +102,8 @@ def seed_initial_data(db: Session) -> None:
         phone="+91-9820194812",
         password_hash=hash_password("parkwise123"),
         role=UserRole.OPERATOR,
+        home_city="Mumbai",
+        email_verified=True,
     )
     gate_staff = User(
         full_name="Rajeshwari Menon (Gate Terminal 01)",
@@ -46,6 +111,8 @@ def seed_initial_data(db: Session) -> None:
         phone="+91-9845091823",
         password_hash=hash_password("parkwise123"),
         role=UserRole.GATE_STAFF,
+        home_city="New Delhi",
+        email_verified=True,
     )
     admin = User(
         full_name="Dheemant Setia (Principal Admin)",
@@ -53,8 +120,44 @@ def seed_initial_data(db: Session) -> None:
         phone="+91-9910088211",
         password_hash=hash_password("parkwise123"),
         role=UserRole.ADMIN,
+        home_city="New Delhi",
+        email_verified=True,
     )
     db.add_all([driver, operator, gate_staff, admin])
+    db.flush()
+
+    # 1b. Seed Vehicles for the Driver User
+    v1 = Vehicle(
+        user_id=driver.id,
+        plate_number="DL-08-CAF-8921",
+        model_name="Tata Nexon EV Empowered+",
+        size_class="SEDAN",
+        dimensions_label="3.99m × 1.81m × 1.62m",
+        is_ev=True,
+        fastag_id="FT-NPCI-ICICI-892104",
+        is_primary=True,
+    )
+    v2 = Vehicle(
+        user_id=driver.id,
+        plate_number="MH-01-AB-4589",
+        model_name="Mahindra XUV700 AX7L",
+        size_class="SUV_XL",
+        dimensions_label="4.69m × 1.89m × 1.75m",
+        is_ev=False,
+        fastag_id="FT-NPCI-HDFC-458912",
+        is_primary=False,
+    )
+    v3 = Vehicle(
+        user_id=driver.id,
+        plate_number="KA-03-MN-1122",
+        model_name="Hyundai i20 N-Line",
+        size_class="COMPACT",
+        dimensions_label="3.99m × 1.77m × 1.50m",
+        is_ev=False,
+        fastag_id="FT-NPCI-AXIS-112209",
+        is_primary=False,
+    )
+    db.add_all([v1, v2, v3])
     db.flush()
 
     # 2. Seed Indian Metropolitan Smart Parking Lots
@@ -249,9 +352,9 @@ def seed_initial_data(db: Session) -> None:
     audit = AuditLog(
         actor_email="admin@parkwise.in",
         actor_role="ADMIN",
-        action="SYSTEM_BOOT_SEED",
-        target_resource="NATIONAL_GRID_5_METROS",
-        details="Initialized 5 metro smart parking hubs, 80 IoT bays, and XGBoost AI pricing engine.",
+        action="SYSTEM_BOOTSTRAPPED",
+        target_resource="ALL_METRO_LOTS",
+        details="Initialized 5 Indian metro smart parking facilities, 80 IoT bays, 4 RBAC roles, and 17 granular permissions.",
     )
     db.add(audit)
     db.commit()
