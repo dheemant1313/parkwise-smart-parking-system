@@ -1,7 +1,7 @@
 """Strict Pydantic v2 Validation Schemas for Parkwise API (Phases 01–04)."""
 import re
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.models import BookingStatus, PaymentStatus, SlotStatus, SlotType, UserRole
 
@@ -891,3 +891,315 @@ class FacilityStaffResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
+
+# ----------------------------------------------------------------------------
+# Phase 07: Parkwise AI Intelligence (Modules 1 - 6)
+#
+# Provenance labels used throughout:
+#   ACTUAL_DB_OBSERVATION  - read directly from the live database
+#   PREDICTED_NOT_ACTUAL   - a model prediction; never an observation
+#   SAMPLE_DATA            - derived from the clearly-labelled sample dataset
+# ----------------------------------------------------------------------------
+class SlotRankerRequest(BaseModel):
+    city: Optional[str] = None
+    target_latitude: float = Field(28.6315, ge=-90, le=90)
+    target_longitude: float = Field(77.2167, ge=-180, le=180)
+    vehicle_size: str = Field("SEDAN", pattern="^(COMPACT|SEDAN|SUV_XL)$")
+    requires_ev: bool = False
+    requires_accessible: bool = False
+    duration_hours: float = Field(2.0, gt=0, le=24)
+    max_hourly_budget_inr: Optional[float] = Field(None, gt=0, le=5000)
+    ranking_strategy: str = Field("WEIGHTED_SCORING", pattern="^(WEIGHTED_SCORING|LEARNED)$")
+    custom_weights: Optional[Dict[str, float]] = None
+    top_k: int = Field(8, ge=1, le=25)
+
+
+class SlotFeatureBreakdown(BaseModel):
+    features: Dict[str, float]
+    weights: Dict[str, float]
+    weighted_contributions: Dict[str, float]
+
+
+class RankedSlotCandidateItem(BaseModel):
+    rank: int
+    lot_id: int
+    lot_code: str
+    lot_name: str
+    city: str
+    slot_id: int
+    slot_number: str
+    floor: int
+    zone: str
+    slot_type: SlotType
+    distance_km: float
+    hourly_rate_inr: float
+    surge_multiplier: float
+    estimated_total_inr: float
+    score: float
+    feature_breakdown: SlotFeatureBreakdown
+    reasons: List[str]
+
+
+class BestSlotRecommendationResponse(BaseModel):
+    requested_strategy: str
+    strategy_used: str
+    ranker_version: str
+    fallback_reason: Optional[str] = None
+    available_strategies: Dict[str, bool]
+    candidates_evaluated: int
+    candidates_rejected_by_constraints: int
+    recommendations: List[RankedSlotCandidateItem]
+    data_label: str = "ACTUAL_DB_OBSERVATION"
+
+
+class ForecastAccuracyMetrics(BaseModel):
+    model_name: str
+    evaluation_split: str
+    mae: float
+    rmse: float
+    mape_pct: float
+    r2: float
+    ci90_coverage_pct: Optional[float] = None
+    sample_size_hours: int
+
+
+class HourlyForecastPoint(BaseModel):
+    target_hour_ist: str
+    day_label: str
+    hour_of_day: int
+    is_weekend: bool
+    baseline_predicted_pct: float
+    xgboost_predicted_pct: float
+    selected_predicted_pct: float = 0.0
+    ci90_lower_pct: float
+    ci90_upper_pct: float
+    data_label: str = "PREDICTED_NOT_ACTUAL"
+
+
+class DailyForecastSummary(BaseModel):
+    date: str
+    day_label: str
+    hours_covered: int = 24
+    avg_predicted_pct: float
+    peak_predicted_pct: float
+    peak_hour_ist: str
+    avg_ci90_width_pct: float
+    data_label: str = "PREDICTED_NOT_ACTUAL"
+
+
+class SevenDayForecastResponse(BaseModel):
+    lot_id: int
+    lot_code: str
+    lot_name: str
+    city: str
+    model_version: str
+    generated_at: datetime
+    actual_current_occupancy: Dict[str, Any]
+    training_data: Dict[str, Any]
+    baseline_test_metrics: ForecastAccuracyMetrics
+    xgboost_test_metrics: ForecastAccuracyMetrics
+    xgboost_vs_baseline_mae_change_pct: float
+    selected_model: str
+    selection_reason: str
+    interval_method: str
+    horizon_hours: int
+    daily_summary: List[DailyForecastSummary]
+    hourly_forecast: List[HourlyForecastPoint]
+    disclaimer: str
+
+
+class PricingProposalCreateRequest(BaseModel):
+    lot_id: int = Field(..., gt=0)
+    window_hours: int = Field(6, ge=1, le=24)
+    min_hourly_rate_inr: Optional[float] = Field(None, ge=10.0, le=5000.0)
+    max_hourly_rate_inr: Optional[float] = Field(None, ge=10.0, le=5000.0)
+
+
+class PricingProposalDecisionRequest(BaseModel):
+    action: str = Field(..., pattern="^(APPROVE|MANUAL_OVERRIDE|REJECT)$")
+    manual_rate_inr: Optional[float] = Field(None, ge=10.0, le=5000.0)
+    notes: str = Field(..., min_length=3, max_length=300)
+
+
+class PricingProposalResponse(BaseModel):
+    id: int
+    proposal_code: str
+    lot_id: int
+    lot_code: str
+    lot_name: str
+    pricing_engine_version: str
+    forecast_model_version: str
+    forecast_training_data_source: str
+    window_start_utc: datetime
+    window_hours: int
+    predicted_peak_occupancy_pct: float
+    ci90_lower_pct: float
+    ci90_upper_pct: float
+    demand_tier: str
+    tier_multiplier: float
+    operator_rule_cap_multiplier: float
+    operator_rule_reference: str
+    base_hourly_rate_inr: float
+    min_hourly_rate_inr: float
+    max_hourly_rate_inr: float
+    unclamped_rate_inr: float
+    recommended_rate_inr: float
+    recommended_multiplier: float
+    was_clamped: bool
+    formula_trace: str
+    warnings: List[str]
+    status: str
+    created_by_email: str
+    decided_by_email: Optional[str] = None
+    applied_rate_inr: Optional[float] = None
+    applied_multiplier: Optional[float] = None
+    decision_notes: Optional[str] = None
+    created_at: datetime
+    decided_at: Optional[datetime] = None
+    prediction_label: str = "PREDICTED_NOT_ACTUAL"
+
+
+class BookingAssistantRequest(BaseModel):
+    message: str = Field(..., min_length=2, max_length=500)
+    preferred_language: str = Field("AUTO", pattern="^(AUTO|en|hi)$")
+
+
+class StructuredSearchParams(BaseModel):
+    city: Optional[str] = None
+    lot_id: Optional[int] = None
+    lot_code: Optional[str] = None
+    target_latitude: Optional[float] = None
+    target_longitude: Optional[float] = None
+    vehicle_size: str = "SEDAN"
+    requires_ev: bool = False
+    requires_accessible: bool = False
+    duration_hours: float = 2.0
+    start_time: datetime
+    end_time: datetime
+    max_hourly_budget_inr: Optional[float] = None
+
+
+class BookingDraft(BaseModel):
+    """Payload the client may submit to POST /api/v1/bookings after user confirmation.
+
+    The booking endpoint re-validates availability inside a transaction; this draft
+    is NOT a reservation and holds no lock.
+    """
+
+    lot_id: int
+    slot_id: int
+    slot_number: str
+    start_time: datetime
+    end_time: datetime
+    vehicle_category: str
+    estimated_total_inr: float
+    submit_to: str = "POST /api/v1/bookings"
+
+
+class BookingAssistantResponse(BaseModel):
+    message: str
+    detected_language: str
+    understood: bool
+    extracted_entities: Dict[str, Any]
+    defaults_applied: List[str]
+    clarifications_needed: List[str]
+    search_params: Optional[StructuredSearchParams] = None
+    backend_validation: Dict[str, Any]
+    validated_options: List[RankedSlotCandidateItem]
+    booking_draft: Optional[BookingDraft] = None
+    reply: str
+    reply_en: str
+    reply_hi: str
+    booking_executed: bool = False
+    policy: str
+
+
+class OperatorAssistantRequest(BaseModel):
+    question: str = Field(..., min_length=2, max_length=500)
+    lot_id: Optional[int] = Field(None, gt=0)
+    days: int = Field(7, ge=1, le=90)
+
+
+class SupportingMetric(BaseModel):
+    name: str
+    value: Optional[float] = None
+    display_value: str
+    unit: str
+    source_tables: List[str]
+    computation: str
+    data_label: str = "ACTUAL_DB_OBSERVATION"
+
+
+class OperatorAssistantResponse(BaseModel):
+    question: str
+    detected_language: str
+    intents: List[str]
+    refused: bool
+    refusal_reason: Optional[str] = None
+    scope: str
+    date_range_start: datetime
+    date_range_end: datetime
+    answer: str
+    supporting_metrics: List[SupportingMetric]
+    data_gaps: List[str]
+    write_capabilities: List[str] = []
+    policy: str
+
+
+class DriftFeatureReport(BaseModel):
+    feature: str
+    reference_source: str
+    current_source: str
+    reference_n: int
+    current_n: int
+    psi: Optional[float] = None
+    status: str
+    note: str
+
+
+class DataQualityCheck(BaseModel):
+    check: str
+    rows_checked: int
+    rows_failing: int
+    pass_rate_pct: float
+    status: str
+
+
+class LiveForecastEvaluation(BaseModel):
+    predictions_stored: int
+    predictions_evaluated: int
+    predictions_pending: int
+    predictions_missed: int
+    mae: Optional[float] = None
+    rmse: Optional[float] = None
+    bias: Optional[float] = None
+    ci90_coverage_pct: Optional[float] = None
+    status: str
+    note: str
+
+
+class ModelMetricLogItem(BaseModel):
+    id: int
+    module_code: str
+    model_version: str
+    lot_id: Optional[int] = None
+    data_source: str
+    metric_name: str
+    metric_value: Optional[float] = None
+    sample_size: int
+    status: str
+    details: Optional[str] = None
+    recorded_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ModelMonitoringResponse(BaseModel):
+    evaluated_at: datetime
+    overall_status: str
+    status_reasons: List[str]
+    live_forecast_evaluation: LiveForecastEvaluation
+    offline_evaluation: Dict[str, Any]
+    drift: List[DriftFeatureReport]
+    data_quality: List[DataQualityCheck]
+    recent_metric_logs: List[ModelMetricLogItem]

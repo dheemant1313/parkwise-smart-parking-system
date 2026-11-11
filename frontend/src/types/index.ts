@@ -513,3 +513,276 @@ export interface OperatorWebSocketEvent {
   timestamp: string;
 }
 
+
+
+// ----------------------------------------------------------------------------
+// Phase 07: AI Intelligence Types (Modules 1 - 6)
+// ----------------------------------------------------------------------------
+export interface RankedSlotCandidateItem {
+  rank: number;
+  lot_id: number;
+  lot_code: string;
+  lot_name: string;
+  city: string;
+  slot_id: number;
+  slot_number: string;
+  floor: number;
+  zone: string;
+  slot_type: SlotType;
+  distance_km: number;
+  hourly_rate_inr: number;
+  surge_multiplier: number;
+  estimated_total_inr: number;
+  score: number;
+  feature_breakdown: {
+    features: Record<string, number>;
+    weights: Record<string, number>;
+    weighted_contributions: Record<string, number>;
+  };
+  reasons: string[];
+}
+
+export interface BestSlotRecommendationResponse {
+  requested_strategy: string;
+  strategy_used: string;
+  ranker_version: string;
+  fallback_reason?: string | null;
+  available_strategies: Record<string, boolean>;
+  candidates_evaluated: number;
+  candidates_rejected_by_constraints: number;
+  recommendations: RankedSlotCandidateItem[];
+  data_label: string;
+}
+
+export interface HourlyForecastPoint {
+  target_hour_ist: string;
+  day_label: string;
+  hour_of_day: number;
+  is_weekend: boolean;
+  baseline_predicted_pct: number;
+  xgboost_predicted_pct: number;
+  selected_predicted_pct: number;
+  ci90_lower_pct: number;
+  ci90_upper_pct: number;
+  data_label: string;
+}
+
+export interface DailyForecastSummary {
+  date: string;
+  day_label: string;
+  hours_covered: number;
+  avg_predicted_pct: number;
+  peak_predicted_pct: number;
+  peak_hour_ist: string;
+  avg_ci90_width_pct: number;
+  data_label: string;
+}
+
+export interface ForecastAccuracyMetrics {
+  model_name: string;
+  evaluation_split: string;
+  mae: number;
+  rmse: number;
+  mape_pct: number;
+  r2: number;
+  ci90_coverage_pct?: number | null;
+  sample_size_hours: number;
+}
+
+export interface SevenDayForecastResponse {
+  lot_id: number;
+  lot_code: string;
+  lot_name: string;
+  city: string;
+  model_version: string;
+  generated_at: string;
+  actual_current_occupancy: {
+    data_label: string;
+    occupied_or_reserved_bays: number;
+    total_bays: number;
+    occupancy_pct: number;
+    observed_at: string;
+  };
+  training_data: {
+    source: string;
+    data_label: string;
+    source_reason: string;
+    history_hours: number;
+    test_hours: number;
+  };
+  baseline_test_metrics: ForecastAccuracyMetrics;
+  xgboost_test_metrics: ForecastAccuracyMetrics;
+  xgboost_vs_baseline_mae_change_pct: number;
+  selected_model: string;
+  selection_reason: string;
+  interval_method: string;
+  horizon_hours: number;
+  daily_summary: DailyForecastSummary[];
+  hourly_forecast: HourlyForecastPoint[];
+  disclaimer: string;
+}
+
+export interface PricingProposalResponse {
+  id: number;
+  proposal_code: string;
+  lot_id: number;
+  lot_code: string;
+  lot_name: string;
+  pricing_engine_version: string;
+  forecast_model_version: string;
+  forecast_training_data_source: string;
+  window_start_utc: string;
+  window_hours: number;
+  predicted_peak_occupancy_pct: number;
+  ci90_lower_pct: number;
+  ci90_upper_pct: number;
+  demand_tier: string;
+  tier_multiplier: number;
+  operator_rule_cap_multiplier: number;
+  operator_rule_reference: string;
+  base_hourly_rate_inr: number;
+  min_hourly_rate_inr: number;
+  max_hourly_rate_inr: number;
+  unclamped_rate_inr: number;
+  recommended_rate_inr: number;
+  recommended_multiplier: number;
+  was_clamped: boolean;
+  formula_trace: string;
+  warnings: string[];
+  status: "PENDING_APPROVAL" | "APPROVED" | "OVERRIDDEN" | "REJECTED";
+  created_by_email: string;
+  decided_by_email?: string | null;
+  applied_rate_inr?: number | null;
+  applied_multiplier?: number | null;
+  decision_notes?: string | null;
+  created_at: string;
+  decided_at?: string | null;
+  prediction_label: string;
+}
+
+export interface BookingDraft {
+  lot_id: number;
+  slot_id: number;
+  slot_number: string;
+  start_time: string;
+  end_time: string;
+  vehicle_category: string;
+  estimated_total_inr: number;
+  submit_to: string;
+}
+
+export interface BookingAssistantResponse {
+  message: string;
+  detected_language: string;
+  understood: boolean;
+  extracted_entities: Record<string, any>;
+  defaults_applied: string[];
+  clarifications_needed: string[];
+  search_params?: {
+    city?: string;
+    lot_id?: number;
+    lot_code?: string;
+    target_latitude?: number;
+    target_longitude?: number;
+    vehicle_size: string;
+    requires_ev: boolean;
+    requires_accessible: boolean;
+    duration_hours: number;
+    start_time: string;
+    end_time: string;
+    max_hourly_budget_inr?: number | null;
+  } | null;
+  backend_validation: {
+    checked_against_db: boolean;
+    conflict_free_bays_count: number;
+    validation_passed: boolean;
+  };
+  validated_options: RankedSlotCandidateItem[];
+  booking_draft?: BookingDraft | null;
+  reply: string;
+  reply_en: string;
+  reply_hi: string;
+  booking_executed: boolean;
+  policy: string;
+}
+
+export interface SupportingMetric {
+  name: string;
+  value?: number | null;
+  display_value: string;
+  unit: string;
+  source_tables: string[];
+  computation: string;
+  data_label: string;
+}
+
+export interface OperatorAssistantResponse {
+  question: string;
+  detected_language: string;
+  intents: string[];
+  refused: boolean;
+  refusal_reason?: string | null;
+  scope: string;
+  date_range_start: string;
+  date_range_end: string;
+  answer: string;
+  supporting_metrics: SupportingMetric[];
+  data_gaps: string[];
+  write_capabilities: string[];
+  policy: string;
+}
+
+export interface DriftFeatureReport {
+  feature: string;
+  reference_source: string;
+  current_source: string;
+  reference_n: number;
+  current_n: number;
+  psi?: number | null;
+  status: string;
+  note: string;
+}
+
+export interface DataQualityCheck {
+  check: string;
+  rows_checked: number;
+  rows_failing: number;
+  pass_rate_pct: number;
+  status: string;
+}
+
+export interface LiveForecastEvaluation {
+  predictions_stored: number;
+  predictions_evaluated: number;
+  predictions_pending: number;
+  predictions_missed: number;
+  mae?: number | null;
+  rmse?: number | null;
+  bias?: number | null;
+  ci90_coverage_pct?: number | null;
+  status: string;
+  note: string;
+}
+
+export interface ModelMonitoringResponse {
+  evaluated_at: string;
+  overall_status: string;
+  status_reasons: string[];
+  live_forecast_evaluation: LiveForecastEvaluation;
+  offline_evaluation: Record<string, any>;
+  drift: DriftFeatureReport[];
+  data_quality: DataQualityCheck[];
+  recent_metric_logs: {
+    id: number;
+    module_code: string;
+    model_version: string;
+    lot_id?: number | null;
+    data_source: string;
+    metric_name: string;
+    metric_value?: number | null;
+    sample_size: number;
+    status: string;
+    details?: string | null;
+    recorded_at: string;
+  }[];
+}

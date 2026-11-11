@@ -536,4 +536,3 @@ class FacilityStaff(Base):
     is_on_duty = Column(Boolean, default=True, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now)
-

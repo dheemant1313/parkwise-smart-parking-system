@@ -132,7 +132,29 @@ from app.schemas import (
     VehicleCategoryResponse,
     VehicleCreateRequest,
     VehicleItemResponse,
+    BestSlotRecommendationResponse,
+    BookingAssistantRequest,
+    BookingAssistantResponse,
+    ModelMonitoringResponse,
+    OperatorAssistantRequest,
+    OperatorAssistantResponse,
+    PricingProposalCreateRequest,
+    PricingProposalDecisionRequest,
+    PricingProposalResponse,
+    SevenDayForecastResponse,
+    SlotRankerRequest,
 )
+import app.models_ai
+from app.ai.booking_assistant import process_booking_assistant_message
+from app.ai.forecasting import generate_seven_day_forecast
+from app.ai.monitoring import get_model_monitoring_overview
+from app.ai.operator_assistant import process_operator_assistant_query
+from app.ai.pricing import (
+    create_pricing_proposal,
+    decide_pricing_proposal,
+    list_pricing_proposals,
+)
+from app.ai.slot_ranker import recommend_best_slots
 from app.seed import seed_initial_data
 from app.services.ai_engine import ai_engine
 from app.services.booking_service import (
@@ -173,16 +195,6 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        try:
-            _ = db.query(FacilityStaff).count()
-            _ = db.query(ParkingLot).first()
-            if db.query(FacilityStaff).count() == 0:
-                Base.metadata.drop_all(bind=engine)
-                Base.metadata.create_all(bind=engine)
-        except Exception:
-            db.rollback()
-            Base.metadata.drop_all(bind=engine)
-            Base.metadata.create_all(bind=engine)
         seed_initial_data(db)
     finally:
         db.close()
@@ -2919,7 +2931,7 @@ async def update_lot_surge(
 
 
 # ----------------------------------------------------------------------------
-# 8. AI Occupancy Forecasting & Dynamic Pricing Engine
+# 8. AI Intelligence (Phase 07: Modules 1 - 6)
 # ----------------------------------------------------------------------------
 @app.get(
     "/api/v1/ai/forecast/{lot_id}",
@@ -2933,6 +2945,139 @@ async def get_ai_forecast(lot_id: int, db: Session = Depends(get_db)):
             detail="Parking lot not found.",
         )
     return ai_engine.generate_lot_forecast(lot)
+
+
+@app.post(
+    "/api/v1/ai/recommendations",
+    response_model=BestSlotRecommendationResponse,
+)
+async def get_ai_slot_recommendations(
+    payload: SlotRankerRequest,
+    db: Session = Depends(get_db),
+):
+    return recommend_best_slots(db=db, req=payload)
+
+
+@app.get(
+    "/api/v1/ai/demand-forecast/{lot_id}",
+    response_model=SevenDayForecastResponse,
+)
+async def get_ai_demand_forecast(
+    lot_id: int,
+    db: Session = Depends(get_db),
+):
+    try:
+        return generate_seven_day_forecast(db=db, lot_id=lot_id)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+
+@app.post(
+    "/api/v1/ai/pricing/proposals",
+    response_model=PricingProposalResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ai_pricing_proposal(
+    payload: PricingProposalCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("lot:manage")),
+):
+    try:
+        return create_pricing_proposal(
+            db=db, req=payload, creator_email=current_user.email
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+
+@app.get(
+    "/api/v1/ai/pricing/proposals",
+    response_model=List[PricingProposalResponse],
+)
+async def list_ai_pricing_proposals(
+    lot_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    limit: int = Query(25, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("lot:manage")),
+):
+    return list_pricing_proposals(
+        db=db, lot_id=lot_id, status=status, limit=limit
+    )
+
+
+@app.post(
+    "/api/v1/ai/pricing/proposals/{proposal_id}/decision",
+    response_model=PricingProposalResponse,
+)
+async def decide_ai_pricing_proposal(
+    proposal_id: int,
+    payload: PricingProposalDecisionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("lot:manage")),
+):
+    try:
+        return decide_pricing_proposal(
+            db=db, proposal_id=proposal_id, req=payload, operator_user=current_user
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+
+@app.post(
+    "/api/v1/ai/booking-assistant",
+    response_model=BookingAssistantResponse,
+)
+async def booking_assistant_query(
+    payload: BookingAssistantRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return process_booking_assistant_message(db=db, req=payload)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+
+@app.post(
+    "/api/v1/ai/operator-assistant",
+    response_model=OperatorAssistantResponse,
+)
+async def operator_assistant_query(
+    payload: OperatorAssistantRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("operator:analytics")),
+):
+    return process_operator_assistant_query(
+        db=db, req=payload, operator_email=current_user.email
+    )
+
+
+@app.get(
+    "/api/v1/ai/monitoring",
+    response_model=ModelMonitoringResponse,
+)
+async def get_ai_monitoring_overview(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("operator:analytics")),
+):
+    return get_model_monitoring_overview(db=db)
 
 
 # ----------------------------------------------------------------------------

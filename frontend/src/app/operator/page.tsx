@@ -5,6 +5,7 @@ import {
   Activity,
   AlertCircle,
   BarChart3,
+  Brain,
   Building2,
   Calendar,
   CheckCircle2,
@@ -30,6 +31,7 @@ import {
 import { useParkwise } from "@/lib/store";
 import { PricingRuleItem, SlotStatus, SlotType } from "@/types";
 import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
+import { AIOperatorConsole } from "@/components/operator/AIOperatorConsole";
 
 type OperatorSection =
   | "OVERVIEW"
@@ -37,7 +39,8 @@ type OperatorSection =
   | "FACILITIES_AND_BAYS"
   | "PRICING_AND_HOURS"
   | "RESERVATIONS_DESK"
-  | "STAFF_AND_REPORTS";
+  | "STAFF_AND_REPORTS"
+  | "AI_INTELLIGENCE_OPS";
 
 const STATUS_CYCLE: SlotStatus[] = [
   "AVAILABLE",
@@ -649,6 +652,12 @@ export default function OperatorDashboardPage() {
       label: "Staff & Report Exports",
       badge: `${staffList.length}`,
       icon: Users,
+    },
+    {
+      id: "AI_INTELLIGENCE_OPS",
+      label: "AI Intelligence & Ops",
+      badge: "6 Modules",
+      icon: Brain,
     },
   ];
 
@@ -2584,6 +2593,17 @@ export default function OperatorDashboardPage() {
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* ============================================================= */}
+            {/* SECTION 7: AI INTELLIGENCE OPS CONSOLE (PHASE 07)             */}
+            {/* ============================================================= */}
+            {activeSection === "AI_INTELLIGENCE_OPS" && (
+              <AIOperatorConsole
+                lots={lots}
+                activeLot={activeLot}
+                onLotChange={(lotId) => setSelectedScope(lotId)}
+              />
             )}
           </main>
         </div>

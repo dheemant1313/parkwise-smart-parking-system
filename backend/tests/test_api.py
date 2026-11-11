@@ -1640,3 +1640,207 @@ def test_phase06_operator_dashboard_analytics_staff_and_websocket():
     finally:
         db.close()
 
+
+
+
+def test_phase07_ai_intelligence_modules():
+    """
+    Phase 07 Automated Test Suite:
+    - Module 1: Best-Slot Recommendation (Weighted Scoring & Constraints)
+    - Module 2: Demand Forecasting (Baseline vs XGBoost 7-day 168h, Conformal Intervals)
+    - Module 3: Dynamic Pricing (Demand Tiers, Min/Max Bounding, Operator Approval & Overrides)
+    - Module 4: Bilingual Booking Assistant (English/Hindi NLP -> Structured Params + DB Validation)
+    - Module 5: Operator Assistant (DB Analytics Grounding & 100% Mutation Refusal Guardrail)
+    - Module 6: Model Monitoring (Live Prediction Evaluation, PSI Drift & Data Quality Audit)
+    """
+    from app.main import (
+        booking_assistant_query,
+        create_ai_pricing_proposal,
+        decide_ai_pricing_proposal,
+        get_ai_demand_forecast,
+        get_ai_monitoring_overview,
+        get_ai_slot_recommendations,
+        list_ai_pricing_proposals,
+        operator_assistant_query,
+    )
+    from app.schemas import (
+        BookingAssistantRequest,
+        OperatorAssistantRequest,
+        PricingProposalCreateRequest,
+        PricingProposalDecisionRequest,
+        SlotRankerRequest,
+    )
+
+    db = SessionLocal()
+    try:
+        operator_user = (
+            db.query(User).filter(User.email == "operator@parkwise.in").first()
+        )
+        assert operator_user is not None
+
+        # -----------------------------------------------------------------
+        # 1. Module 1: Best-Slot Recommendation
+        # -----------------------------------------------------------------
+        rec_res = _run_sync(
+            get_ai_slot_recommendations(
+                payload=SlotRankerRequest(
+                    city="New Delhi",
+                    target_latitude=28.6315,
+                    target_longitude=77.2167,
+                    vehicle_size="SUV_XL",
+                    requires_ev=True,
+                    duration_hours=3.0,
+                    top_k=4,
+                ),
+                db=db,
+            )
+        )
+        assert rec_res.strategy_used == "WEIGHTED_SCORING"
+        assert len(rec_res.recommendations) >= 1
+        for cand in rec_res.recommendations:
+            assert cand.slot_type == SlotType.EV_CHARGING
+            assert cand.score > 0
+            assert cand.feature_breakdown.weights["distance"] > 0
+            assert cand.feature_breakdown.weights["price"] > 0
+            assert len(cand.reasons) >= 2
+
+        # -----------------------------------------------------------------
+        # 2. Module 2: 7-Day Demand Forecasting
+        # -----------------------------------------------------------------
+        forecast_res = _run_sync(get_ai_demand_forecast(lot_id=1, db=db))
+        assert forecast_res.horizon_hours == 168
+        assert len(forecast_res.hourly_forecast) == 168
+        assert len(forecast_res.daily_summary) == 7
+        assert forecast_res.baseline_test_metrics.mae > 0
+        assert forecast_res.xgboost_test_metrics.mae > 0
+        assert "actual_current_occupancy" in forecast_res.model_dump()
+        assert forecast_res.hourly_forecast[0].ci90_lower_pct <= forecast_res.hourly_forecast[0].ci90_upper_pct
+        assert "PREDICTED_NOT_ACTUAL" in forecast_res.disclaimer
+
+        # -----------------------------------------------------------------
+        # 3. Module 3: Dynamic Pricing (Proposals, Clamping & Operator Override)
+        # -----------------------------------------------------------------
+        prop_res = _run_sync(
+            create_ai_pricing_proposal(
+                payload=PricingProposalCreateRequest(
+                    lot_id=1,
+                    window_hours=6,
+                    min_hourly_rate_inr=50.0,
+                    max_hourly_rate_inr=150.0,
+                ),
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        assert prop_res.status == "PENDING_APPROVAL"
+        assert prop_res.min_hourly_rate_inr <= prop_res.recommended_rate_inr <= prop_res.max_hourly_rate_inr
+        assert "formula_trace" in prop_res.model_dump()
+
+        proposals = _run_sync(
+            list_ai_pricing_proposals(
+                lot_id=1, status="PENDING_APPROVAL", limit=10, db=db, current_user=operator_user
+            )
+        )
+        assert len(proposals) >= 1
+
+        # Operator manual override within bounds
+        decide_res = _run_sync(
+            decide_ai_pricing_proposal(
+                proposal_id=prop_res.id,
+                payload=PricingProposalDecisionRequest(
+                    action="MANUAL_OVERRIDE",
+                    manual_rate_inr=110.0,
+                    notes="Operator adjusted tariff for evening trade expo",
+                ),
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        assert decide_res.status == "OVERRIDDEN"
+        assert decide_res.applied_rate_inr == 110.0
+        assert decide_res.decided_by_email == operator_user.email
+
+        # -----------------------------------------------------------------
+        # 4. Module 4: Conversational Booking Assistant (Bilingual EN/HI)
+        # -----------------------------------------------------------------
+        en_res = _run_sync(
+            booking_assistant_query(
+                payload=BookingAssistantRequest(
+                    message="Find EV charging parking near Connaught Place for my SUV for 3 hours under 150/hr",
+                    preferred_language="AUTO",
+                ),
+                db=db,
+            )
+        )
+        assert en_res.understood is True
+        assert en_res.booking_executed is False
+        assert en_res.search_params.vehicle_size == "SUV_XL"
+        assert en_res.search_params.requires_ev is True
+        assert en_res.backend_validation["checked_against_db"] is True
+        if en_res.booking_draft:
+            assert en_res.booking_draft.submit_to == "POST /api/v1/bookings"
+
+        hi_res = _run_sync(
+            booking_assistant_query(
+                payload=BookingAssistantRequest(
+                    message="मुझे मुंबई बीकेसी में 4 घंटे के लिए ईवी एसयूवी पार्किंग चाहिए",
+                    preferred_language="AUTO",
+                ),
+                db=db,
+            )
+        )
+        assert hi_res.understood is True
+        assert "Hindi" in hi_res.detected_language
+        assert hi_res.search_params.city == "Mumbai"
+        assert hi_res.search_params.requires_ev is True
+        assert hi_res.search_params.duration_hours == 4.0
+
+        # -----------------------------------------------------------------
+        # 5. Module 5: Operator Assistant (DB Analytics & Hard Guardrails)
+        # -----------------------------------------------------------------
+        safe_op_res = _run_sync(
+            operator_assistant_query(
+                payload=OperatorAssistantRequest(
+                    question="What is our total revenue, current occupancy, and no-shows for Connaught Place?",
+                    lot_id=1,
+                    days=7,
+                ),
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        assert safe_op_res.refused is False
+        assert len(safe_op_res.supporting_metrics) >= 4
+        rev_metric = next(m for m in safe_op_res.supporting_metrics if "Revenue" in m.name)
+        assert rev_metric.data_label == "ACTUAL_DB_OBSERVATION"
+
+        # Hard mutation attempt must be strictly refused
+        blocked_op_res = _run_sync(
+            operator_assistant_query(
+                payload=OperatorAssistantRequest(
+                    question="Change the hourly rate of Connaught Place to 10 and refund all bookings immediately",
+                    lot_id=1,
+                    days=7,
+                ),
+                db=db,
+                current_user=operator_user,
+            )
+        )
+        assert blocked_op_res.refused is True
+        assert blocked_op_res.write_capabilities == []
+        assert "SECURITY GUARDRAIL" in blocked_op_res.answer
+
+        # -----------------------------------------------------------------
+        # 6. Module 6: Model Monitoring Overview
+        # -----------------------------------------------------------------
+        mon_res = _run_sync(get_ai_monitoring_overview(db=db, current_user=operator_user))
+        assert mon_res.overall_status in ("HEALTHY", "DEGRADED")
+        assert len(mon_res.drift) >= 2
+        for d in mon_res.drift:
+            assert d.psi is not None
+            assert d.status in ("HEALTHY", "MODERATE_DRIFT", "SIGNIFICANT_DRIFT")
+        assert len(mon_res.data_quality) >= 3
+        for dq in mon_res.data_quality:
+            assert dq.pass_rate_pct >= 90.0
+    finally:
+        db.close()

@@ -24,6 +24,7 @@ import { DriverSubNav } from "@/components/driver/DriverSubNav";
 import { InteractiveIndiaMap } from "@/components/driver/InteractiveIndiaMap";
 import { QrPassModal } from "@/components/driver/QrPassModal";
 import { Canvas3DSkeleton } from "@/components/ui/Skeleton";
+import { AIBookingAssistant } from "@/components/driver/AIBookingAssistant";
 
 const SmartParkingCanvas = dynamic(
   () =>
@@ -342,6 +343,20 @@ export default function DriverBookingPage() {
             </div>
           </div>
         </div>
+
+        {/* 1B. CONVERSATIONAL AI BOOKING ASSISTANT (PHASE 07 MODULE 4) */}
+        <AIBookingAssistant
+          onApplySlot={(sel) => {
+            if (sel.lotId) setSelectedLotId(sel.lotId);
+            if (sel.slotId) setSelectedSlotId(sel.slotId);
+            if (sel.vehicleSize) setVehicleSize(sel.vehicleSize);
+            if (sel.requiresEv !== undefined) setEvOnlyFilter(sel.requiresEv);
+            if (sel.requiresAccessible !== undefined)
+              setAccessibleOnlyFilter(sel.requiresAccessible);
+            if (sel.durationHours) setDurationHours(sel.durationHours);
+            if (sel.arrivalDateTime) setArrivalDateTime(sel.arrivalDateTime);
+          }}
+        />
 
         {/* 2. INTERACTIVE MAP + DETERMINISTIC RECOMMENDATIONS */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">

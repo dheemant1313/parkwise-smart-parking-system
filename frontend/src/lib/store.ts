@@ -2492,8 +2492,9 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       else if (normalizedEmail.includes("gate")) matchedRole = "GATE_STAFF";
 
       if (backendConnected) {
+        let res: Response | null = null;
         try {
-          const res = await fetch(`${API_BASE}/auth/login`, {
+          res = await fetch(`${API_BASE}/auth/login`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "include",
@@ -2503,17 +2504,19 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
               device_label: deviceLabel,
             }),
           });
+        } catch {
+          // Network failure only (backend unreachable): fall through to the
+          // offline demo session below. Credential rejections are NOT bypassed.
+          res = null;
+        }
+        if (res) {
           if (!res.ok) {
             const errJson = await res.json().catch(() => null);
-            if (
-              (res.status === 401 || res.status === 403) &&
-              password !== "parkwise123"
-            ) {
-              throw new Error(
-                errJson?.detail || `Authentication failed (${res.status}).`
-              );
-            }
-          } else {
+            throw new Error(
+              errJson?.detail || `Authentication failed (${res.status}).`
+            );
+          }
+          {
             const data = await res.json();
             const role = (data.role as UserRole) || matchedRole;
             const defaultPreset =
@@ -2568,11 +2571,6 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
             setSessions([newSess, ...sessions]);
             return loggedUser;
           }
-        } catch (err) {
-          if (password !== "parkwise123" && err instanceof Error) {
-            throw err;
-          }
-          // Fall through to deterministic RBAC session
         }
       }
 

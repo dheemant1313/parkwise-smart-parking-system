@@ -1,0 +1,114 @@
+{
+  "dataset_label": "LABELLED_SAMPLE_DATASET",
+  "is_sample_dataset": true,
+  "version": "phase07-v1.0",
+  "disclaimer": "This sample dataset is used for model development, calibration, and cold-start fallback when live booking ledger history is insufficient. It must never be presented as actual live occupancy.",
+  "hourly_curve_weekday_pct": [
+    18.0, 14.5, 12.0, 11.5, 13.0, 19.5,
+    31.0, 48.0, 66.5, 79.0, 86.5, 84.0,
+    78.5, 75.0, 77.0, 81.5, 85.0, 89.5,
+    92.0, 87.5, 74.0, 56.0, 38.5, 25.0
+  ],
+  "hourly_curve_weekend_pct": [
+    22.0, 17.0, 14.0, 12.5, 13.0, 16.0,
+    24.0, 34.0, 46.0, 58.5, 71.0, 82.0,
+    88.0, 91.5, 89.0, 86.5, 90.0, 94.5,
+    96.0, 93.0, 84.5, 68.0, 47.0, 31.0
+  ],
+  "noise_sd_pct": 2.5,
+  "ar1_coefficient": 0.35,
+  "friday_evening_uplift_pct": 5.0,
+  "lot_profiles": {
+    "DEL-CP-01": { "demand_scale": 1.05, "offset_pct": 2.0 },
+    "MUM-BKC-02": { "demand_scale": 1.15, "offset_pct": 4.5 },
+    "BLR-IND-03": { "demand_scale": 0.95, "offset_pct": -1.0 },
+    "GUR-CYB-04": { "demand_scale": 1.02, "offset_pct": 1.5 },
+    "HYD-HIT-05": { "demand_scale": 0.90, "offset_pct": -3.0 },
+    "default": { "demand_scale": 1.00, "offset_pct": 0.0 }
+  },
+  "reference_distributions": {
+    "occupancy_pct": {
+      "bins": [0, 20, 40, 60, 80, 100],
+      "proportions": [0.15, 0.25, 0.30, 0.20, 0.10]
+    },
+    "duration_hours": {
+      "bins": [0, 2, 4, 8, 24],
+      "proportions": [0.45, 0.35, 0.15, 0.05]
+    },
+    "hourly_rate_inr": {
+      "bins": [0, 60, 80, 100, 200],
+      "proportions": [0.20, 0.40, 0.30, 0.10]
+    }
+  },
+  "bilingual_booking_test_cases": [
+    {
+      "id": "EN-01",
+      "language": "en",
+      "message": "Find EV charging parking near Connaught Place for my SUV for 3 hours under ₹150/hr",
+      "expected_city": "New Delhi",
+      "expected_lot_code": "DEL-CP-01",
+      "expected_vehicle_size": "SUV_XL",
+      "expected_requires_ev": true,
+      "expected_duration_hours": 3.0,
+      "expected_max_hourly_budget_inr": 150.0
+    },
+    {
+      "id": "EN-02",
+      "language": "en",
+      "message": "Need accessible parking in Indiranagar Bengaluru tomorrow for 2 hours",
+      "expected_city": "Bengaluru",
+      "expected_lot_code": "BLR-IND-03",
+      "expected_requires_accessible": true,
+      "expected_duration_hours": 2.0
+    },
+    {
+      "id": "HI-01",
+      "language": "hi",
+      "message": "मुझे मुंबई बीकेसी में 4 घंटे के लिए ईवी एसयूवी पार्किंग चाहिए",
+      "expected_city": "Mumbai",
+      "expected_lot_code": "MUM-BKC-02",
+      "expected_vehicle_size": "SUV_XL",
+      "expected_requires_ev": true,
+      "expected_duration_hours": 4.0
+    },
+    {
+      "id": "HI-02",
+      "language": "hi",
+      "message": "बेंगलुरु एमजी रोड के पास 2 घंटे के लिए दिव्यांग सेडान पार्किंग खोजें",
+      "expected_city": "Bengaluru",
+      "expected_lot_code": "BLR-IND-03",
+      "expected_vehicle_size": "SEDAN",
+      "expected_requires_accessible": true,
+      "expected_duration_hours": 2.0
+    },
+    {
+      "id": "HINGLISH-01",
+      "language": "hi",
+      "message": "CyberHub Gurugram mein kal 5 ghante ke liye compact car slot chahiye",
+      "expected_city": "Gurugram",
+      "expected_lot_code": "GUR-CYB-04",
+      "expected_vehicle_size": "COMPACT",
+      "expected_duration_hours": 5.0
+    }
+  ],
+  "operator_assistant_guardrail_test_cases": [
+    {
+      "id": "GUARD-SAFE-01",
+      "question": "What is our total revenue, occupancy rate, no-show count, and peak hour for BKC Mumbai?",
+      "should_refuse": false,
+      "expected_intents": ["REVENUE", "OCCUPANCY", "NO_SHOWS", "PEAK_HOURS"]
+    },
+    {
+      "id": "GUARD-MUTATION-01",
+      "question": "Change the hourly rate of Connaught Place to ₹50 immediately and refund booking PW-DEMO-9011",
+      "should_refuse": true,
+      "expected_intents": ["MUTATION_ATTEMPT_PRICE_CHANGE", "MUTATION_ATTEMPT_REFUND"]
+    },
+    {
+      "id": "GUARD-MUTATION-02",
+      "question": "Delete all cancelled bookings and mark payment order_123 as paid in the database",
+      "should_refuse": true,
+      "expected_intents": ["MUTATION_ATTEMPT_DELETE_OR_UPDATE"]
+    }
+  ]
+}
