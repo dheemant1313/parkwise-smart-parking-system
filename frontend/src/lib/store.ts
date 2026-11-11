@@ -20,11 +20,16 @@ import {
   DriverVehicle,
   DurationAndQuoteResult,
   GateLogEntry,
+  OfflineGateQueueItem,
+  OfflineSyncReportItem,
   ParkingFloorItem,
   ParkingLot,
   ParkingSlot,
   ParkingZoneItem,
+  PaymentReceiptData,
+  PaymentWebhookLogItem,
   PricingRuleItem,
+  QRPassTokenItem,
   RoleDefinition,
   SlotRecommendation,
   SlotStatus,
@@ -399,7 +404,20 @@ const INITIAL_BOOKINGS: Booking[] = [
     total_amount_inr: 368.75,
     status: "CONFIRMED",
     qr_signature: DEMO_SIG,
-    qr_payload: `PARKWISE|PW-DEMO-9012|101|DL-08-CAF-8921|${DEMO_SIG}`,
+    qr_payload: `PARKWISE|V2|PW-DEMO-9012|101|DL-08-CAF-8921|qr_jti_demo_9012|${Math.floor((ANCHOR_MS + 24 * 3600 * 1000) / 1000)}|${DEMO_SIG}`,
+    qr_pass: {
+      token_jti: "qr_jti_demo_9012",
+      booking_reference: "PW-DEMO-9012",
+      qr_signature: DEMO_SIG,
+      qr_payload: `PARKWISE|V2|PW-DEMO-9012|101|DL-08-CAF-8921|qr_jti_demo_9012|${Math.floor((ANCHOR_MS + 24 * 3600 * 1000) / 1000)}|${DEMO_SIG}`,
+      issued_at: new Date(ANCHOR_MS - 20 * 60 * 1000).toISOString(),
+      expires_at: new Date(Date.now() + 180 * 60 * 1000).toISOString(),
+      is_revoked: false,
+      revoked_at: null,
+      revoked_reason: null,
+      entry_used_at: null,
+      exit_used_at: null,
+    },
     checked_in_at: null,
     checked_out_at: null,
     overstay_fee_inr: 0,
@@ -407,11 +425,17 @@ const INITIAL_BOOKINGS: Booking[] = [
     payment: {
       razorpay_order_id: "order_pw_demo_9012",
       razorpay_payment_id: "pay_pw_demo_9012",
+      razorpay_signature: "rzp_hmac_sha256_9012_verified_a8f4c1e9",
       amount_inr: 368.75,
       currency: "INR",
       payment_method: "UPI / FASTag Auto-Debit",
+      upi_vpa: "aarav.sharma@okicici",
+      upi_intent_uri:
+        "upi://pay?pa=parkwise.mobility@axis&pn=Parkwise%20Smart%20Parking&tr=order_pw_demo_9012&tn=Parkwise%20Booking%20PW-DEMO-9012&am=368.75&cu=INR",
+      receipt_number: "PW-GST-20261111-0001",
       status: "CAPTURED",
       is_simulated: true,
+      verified_at: new Date(ANCHOR_MS - 19 * 60 * 1000).toISOString(),
     },
   },
 ];
@@ -827,11 +851,53 @@ interface ParkwiseContextValue {
     vehicleNumber: string;
     action: "ENTRY" | "EXIT";
     gateLane?: string;
+    simulateOverstayMinutes?: number;
   }) => Promise<{
     allowed: boolean;
     message: string;
     log: GateLogEntry;
   }>;
+  issueOrRotateQRPass: (
+    bookingReference: string,
+    ttlMinutes?: number
+  ) => Promise<QRPassTokenItem>;
+  revokeQRPass: (
+    bookingReference: string,
+    reason: string
+  ) => Promise<QRPassTokenItem>;
+  expireQRPassForDemo: (bookingReference: string) => Promise<QRPassTokenItem>;
+  manualGateOverride: (params: {
+    lotId: number;
+    bookingReference?: string;
+    vehicleNumber: string;
+    action: "OPEN_ENTRY" | "OPEN_EXIT" | "LOCK_LANE";
+    gateLane?: string;
+    overrideReason: string;
+  }) => Promise<GateLogEntry>;
+  offlineMode: boolean;
+  setOfflineMode: (enabled: boolean) => void;
+  offlineGateQueue: OfflineGateQueueItem[];
+  queueOfflineGateScan: (params: {
+    bookingReference: string;
+    qrSignature: string;
+    vehicleNumber: string;
+    action: "ENTRY" | "EXIT";
+    gateLane?: string;
+  }) => OfflineGateQueueItem;
+  syncOfflineGateQueue: () => Promise<OfflineSyncReportItem[]>;
+  webhookLogs: PaymentWebhookLogItem[];
+  triggerRazorpayWebhook: (params: {
+    webhookEventId: string;
+    eventType: "payment.captured" | "payment.failed" | "refund.processed";
+    bookingReference: string;
+    tamperSignature?: boolean;
+  }) => Promise<PaymentWebhookLogItem>;
+  refundBookingPayment: (
+    bookingReference: string,
+    reason: string,
+    amountInr?: number
+  ) => Promise<Booking>;
+  getPaymentReceipt: (bookingReference: string) => PaymentReceiptData;
   updateSlotStatus: (
     lotId: number,
     slotId: number,
@@ -986,6 +1052,24 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
     ROLE_DEFINITIONS_DEFAULT
   );
   const [backendConnected, setBackendConnected] = useState<boolean>(false);
+  const [offlineMode, setOfflineMode] = useState<boolean>(false);
+  const [offlineGateQueue, setOfflineGateQueue] = useState<
+    OfflineGateQueueItem[]
+  >([]);
+  const [webhookLogs, setWebhookLogs] = useState<PaymentWebhookLogItem[]>([
+    {
+      id: 1,
+      webhook_event_id: "evt_rzp_demo_9012_captured",
+      event_type: "payment.captured",
+      razorpay_order_id: "order_pw_demo_9012",
+      razorpay_payment_id: "pay_pw_demo_9012",
+      booking_reference: "PW-DEMO-9012",
+      signature_verified: true,
+      idempotent_replay: false,
+      status_applied: "CAPTURED",
+      processed_at: new Date(ANCHOR_MS - 19 * 60 * 1000).toISOString(),
+    },
+  ]);
 
   const setActiveRole = useCallback((role: UserRole) => {
     setActiveRoleState(role);
@@ -1153,6 +1237,11 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
         slot.id,
         normalizedPlate
       );
+      const tokenJti = `qr_jti_${randomHex}_${Date.now().toString(16).slice(-6)}`;
+      const expEpoch = Math.floor((endMs + 2 * 3600 * 1000) / 1000);
+      const qrPayload = `PARKWISE|V2|${bookingRef}|${slot.id}|${normalizedPlate}|${tokenJti}|${expEpoch}|${qrSignature}`;
+      const orderId = `order_pw_${randomHex}_${Date.now().toString().slice(-4)}`;
+      const paymentId = `pay_pw_${randomHex}_verified`;
 
       const newBooking: Booking = {
         id: bookings.length + 1,
@@ -1174,19 +1263,37 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
         total_amount_inr: totalAmount,
         status: "CONFIRMED",
         qr_signature: qrSignature,
-        qr_payload: `PARKWISE|${bookingRef}|${slot.id}|${normalizedPlate}|${qrSignature}`,
+        qr_payload: qrPayload,
+        qr_pass: {
+          token_jti: tokenJti,
+          booking_reference: bookingRef,
+          qr_signature: qrSignature,
+          qr_payload: qrPayload,
+          issued_at: new Date().toISOString(),
+          expires_at: new Date(endMs + 2 * 3600 * 1000).toISOString(),
+          is_revoked: false,
+          revoked_at: null,
+          revoked_reason: null,
+          entry_used_at: null,
+          exit_used_at: null,
+        },
         checked_in_at: null,
         checked_out_at: null,
         overstay_fee_inr: 0,
         created_at: new Date().toISOString(),
         payment: {
-          razorpay_order_id: `order_pw_${randomHex}_${Date.now().toString().slice(-4)}`,
-          razorpay_payment_id: `pay_pw_${randomHex}_verified`,
+          razorpay_order_id: orderId,
+          razorpay_payment_id: paymentId,
+          razorpay_signature: `rzp_hmac_${qrSignature.slice(0, 20)}`,
           amount_inr: totalAmount,
           currency: "INR",
           payment_method: input.paymentMethod,
+          upi_vpa: "driver.parkwise@okicici",
+          upi_intent_uri: `upi://pay?pa=parkwise.mobility@axis&pn=Parkwise%20Smart%20Parking&tr=${orderId}&tn=Parkwise%20Booking%20${bookingRef}&am=${totalAmount.toFixed(2)}&cu=INR`,
+          receipt_number: `PW-GST-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(bookings.length + 1).padStart(4, "0")}`,
           status: "CAPTURED",
           is_simulated: true,
+          verified_at: new Date().toISOString(),
         },
       };
 
@@ -1654,6 +1761,7 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       vehicleNumber: string;
       action: "ENTRY" | "EXIT";
       gateLane?: string;
+      simulateOverstayMinutes?: number;
     }) => {
       const refClean = params.bookingReference.trim().toUpperCase();
       const plateClean = params.vehicleNumber.trim().toUpperCase();
@@ -1676,7 +1784,8 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
 
       if (
         params.qrSignature.trim() !== booking.qr_signature &&
-        params.qrSignature.trim() !== expectedSig
+        params.qrSignature.trim() !== expectedSig &&
+        params.qrSignature.trim() !== booking.qr_pass?.qr_signature
       ) {
         const deniedLog: GateLogEntry = {
           id: gateLogs.length + 1,
@@ -1699,15 +1808,131 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      // Check QR token revocation
+      if (booking.qr_pass?.is_revoked) {
+        const revokedLog: GateLogEntry = {
+          id: gateLogs.length + 1,
+          lot_id: booking.lot_id,
+          booking_reference: booking.booking_reference,
+          vehicle_number: plateClean,
+          event_type: "DENIED_REVOKED_QR_PASS",
+          gate_lane: lane,
+          anpr_confidence: 0.985,
+          verification_method: "QR_TOKEN_REVOKED",
+          barrier_action: "LOCKED",
+          notes: `QR pass token ${booking.qr_pass.token_jti} was revoked (${booking.qr_pass.revoked_reason || "Security revocation"}).`,
+          timestamp: new Date().toISOString(),
+        };
+        const nextGateLogs = [revokedLog, ...gateLogs];
+        setGateLogs(nextGateLogs);
+        persistState(lots, bookings, nextGateLogs, auditLogs);
+        throw new Error(
+          `Security Alert: QR pass token ${booking.qr_pass.token_jti} has been revoked (${booking.qr_pass.revoked_reason || "Revoked"}). Boom barrier locked.`
+        );
+      }
+
+      // Check QR token expiration
+      if (
+        booking.qr_pass?.expires_at &&
+        new Date(booking.qr_pass.expires_at).getTime() < Date.now()
+      ) {
+        const expLog: GateLogEntry = {
+          id: gateLogs.length + 1,
+          lot_id: booking.lot_id,
+          booking_reference: booking.booking_reference,
+          vehicle_number: plateClean,
+          event_type: "DENIED_EXPIRED_QR_PASS",
+          gate_lane: lane,
+          anpr_confidence: 0.984,
+          verification_method: "QR_TOKEN_EXPIRED",
+          barrier_action: "LOCKED",
+          notes: `Time-limited QR pass ${booking.qr_pass.token_jti} expired at ${new Date(booking.qr_pass.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`,
+          timestamp: new Date().toISOString(),
+        };
+        const nextGateLogs = [expLog, ...gateLogs];
+        setGateLogs(nextGateLogs);
+        persistState(lots, bookings, nextGateLogs, auditLogs);
+        throw new Error(
+          `Security Alert: Time-limited QR pass (${booking.qr_pass.token_jti}) expired. Please issue/rotate a fresh QR pass.`
+        );
+      }
+
       if (booking.vehicle_number.toUpperCase() !== plateClean) {
+        const plateLog: GateLogEntry = {
+          id: gateLogs.length + 1,
+          lot_id: booking.lot_id,
+          booking_reference: booking.booking_reference,
+          vehicle_number: plateClean,
+          event_type: "DENIED_PLATE_MISMATCH",
+          gate_lane: lane,
+          anpr_confidence: 0.964,
+          verification_method: "ANPR_OPTICAL_MISMATCH",
+          barrier_action: "LOCKED",
+          notes: `ANPR detected ${plateClean} vs registered ${booking.vehicle_number}.`,
+          timestamp: new Date().toISOString(),
+        };
+        const nextGateLogs = [plateLog, ...gateLogs];
+        setGateLogs(nextGateLogs);
+        persistState(lots, bookings, nextGateLogs, auditLogs);
         throw new Error(
           `ANPR Optical Mismatch: Camera detected '${plateClean}', but booking is registered to '${booking.vehicle_number}'.`
         );
       }
 
-      if (params.action === "ENTRY" && booking.status === "COMPLETED") {
+      // Duplicate ENTRY replay protection
+      if (
+        params.action === "ENTRY" &&
+        (booking.checked_in_at ||
+          booking.qr_pass?.entry_used_at ||
+          booking.status === "ACTIVE" ||
+          booking.status === "COMPLETED")
+      ) {
+        const dupEntryLog: GateLogEntry = {
+          id: gateLogs.length + 1,
+          lot_id: booking.lot_id,
+          booking_reference: booking.booking_reference,
+          vehicle_number: plateClean,
+          event_type: "DENIED_DUPLICATE_ENTRY",
+          gate_lane: lane,
+          anpr_confidence: 0.991,
+          verification_method: "ANTI_REPLAY_GUARD",
+          barrier_action: "LOCKED",
+          notes: `Blocked duplicate ENTRY replay for ${booking.booking_reference} (already checked in at ${booking.checked_in_at || "earlier scan"}).`,
+          timestamp: new Date().toISOString(),
+        };
+        const nextGateLogs = [dupEntryLog, ...gateLogs];
+        setGateLogs(nextGateLogs);
+        persistState(lots, bookings, nextGateLogs, auditLogs);
         throw new Error(
-          "This reservation has already completed check-out and cannot re-enter."
+          `Replay Attack Blocked: Duplicate ENTRY scan rejected — ${booking.booking_reference} has already entered the facility.`
+        );
+      }
+
+      // Duplicate EXIT replay protection
+      if (
+        params.action === "EXIT" &&
+        (booking.checked_out_at ||
+          booking.qr_pass?.exit_used_at ||
+          booking.status === "COMPLETED")
+      ) {
+        const dupExitLog: GateLogEntry = {
+          id: gateLogs.length + 1,
+          lot_id: booking.lot_id,
+          booking_reference: booking.booking_reference,
+          vehicle_number: plateClean,
+          event_type: "DENIED_DUPLICATE_EXIT",
+          gate_lane: lane,
+          anpr_confidence: 0.991,
+          verification_method: "ANTI_REPLAY_GUARD",
+          barrier_action: "LOCKED",
+          notes: `Blocked duplicate EXIT replay for ${booking.booking_reference} (already checked out).`,
+          timestamp: new Date().toISOString(),
+        };
+        const nextGateLogs = [dupExitLog, ...gateLogs];
+        setGateLogs(nextGateLogs);
+        persistState(lots, bookings, nextGateLogs, auditLogs);
+        throw new Error(
+          `Replay Attack Blocked: Duplicate EXIT scan rejected — ${booking.booking_reference} has already completed check-out.`
         );
       }
 
@@ -1718,6 +1943,27 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       }
 
       const nowIso = new Date().toISOString();
+      const lot = lots.find((l) => l.id === booking.lot_id) || lots[0];
+
+      // Overstay fee calculation on EXIT
+      let computedOverstayFee = 0;
+      if (params.action === "EXIT") {
+        const endMs = new Date(booking.end_time).getTime();
+        const exitMs = params.simulateOverstayMinutes
+          ? endMs + params.simulateOverstayMinutes * 60 * 1000
+          : Date.now();
+        const graceMins = lot.grace_period_minutes ?? 15;
+        const overMins = Math.max(0, (exitMs - endMs) / 60000);
+        if (overMins > graceMins) {
+          const billableHalfHours =
+            Math.ceil((overMins - graceMins) / 30) * 0.5;
+          computedOverstayFee =
+            Math.round(
+              billableHalfHours * lot.base_hourly_rate_inr * 1.5 * 100
+            ) / 100;
+        }
+      }
+
       const nextBookings = bookings.map((b) => {
         if (b.booking_reference !== booking.booking_reference) return b;
         if (params.action === "ENTRY") {
@@ -1725,12 +1971,20 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
             ...b,
             status: "ACTIVE" as const,
             checked_in_at: nowIso,
+            qr_pass: b.qr_pass
+              ? { ...b.qr_pass, entry_used_at: nowIso }
+              : null,
           };
         }
         return {
           ...b,
           status: "COMPLETED" as const,
           checked_out_at: nowIso,
+          overstay_fee_inr:
+            Math.round((b.overstay_fee_inr + computedOverstayFee) * 100) / 100,
+          total_amount_inr:
+            Math.round((b.total_amount_inr + computedOverstayFee) * 100) / 100,
+          qr_pass: b.qr_pass ? { ...b.qr_pass, exit_used_at: nowIso } : null,
         };
       });
 
@@ -1750,8 +2004,8 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
 
       const message =
         params.action === "ENTRY"
-          ? `Boom Barrier OPENED. Welcome ${plateClean} — Proceed to Bay ${booking.slot_number}.`
-          : `Boom Barrier OPENED. Exit completed for ${plateClean} — Bay ${booking.slot_number} is now AVAILABLE.`;
+          ? `Boom Barrier OPENED. Welcome ${plateClean} — Proceed to Bay ${booking.slot_number} (Entry stamped at ${new Date(nowIso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}).`
+          : `Boom Barrier OPENED. Exit completed for ${plateClean} — Bay ${booking.slot_number} is now AVAILABLE.${computedOverstayFee > 0 ? ` Overstay fee applied: ₹${computedOverstayFee}.` : " Zero overstay penalty."}`;
 
       const logEntry: GateLogEntry = {
         id: gateLogs.length + 1,
@@ -1763,6 +2017,7 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
         anpr_confidence: 0.991,
         verification_method: "QR_HMAC + ANPR_OPTICAL",
         barrier_action: "OPENED",
+        overstay_fee_inr: computedOverstayFee,
         notes: message,
         timestamp: nowIso,
       };
@@ -2913,6 +3168,815 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
     [bookings, lots, gateLogs, auditLogs, persistState]
   );
 
+  // --------------------------------------------------------------------------
+  // Phase 05: Payments, Signed QR Pass System, Manual Override & Offline Sync
+  // --------------------------------------------------------------------------
+  const issueOrRotateQRPass = useCallback(
+    async (
+      bookingReference: string,
+      ttlMinutes = 180
+    ): Promise<QRPassTokenItem> => {
+      const target = bookings.find(
+        (b) =>
+          b.booking_reference.toUpperCase() ===
+          bookingReference.trim().toUpperCase()
+      );
+      if (!target) throw new Error("Booking reference not found.");
+      if (target.status === "CANCELLED" || target.status === "COMPLETED") {
+        throw new Error(
+          `Cannot issue or rotate a QR pass for a ${target.status} booking.`
+        );
+      }
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
+      const expEpoch = Math.floor(expiresAt.getTime() / 1000);
+      const tokenJti = `qr_jti_${Date.now().toString(16)}`;
+      const baseSig = generateDeterministicSignature(
+        target.booking_reference,
+        target.slot_id,
+        target.vehicle_number
+      );
+      const newSig = `${baseSig.slice(0, 52)}${tokenJti.slice(-12)}`;
+      const newPayload = `PARKWISE|V2|${target.booking_reference}|${target.slot_id}|${target.vehicle_number}|${tokenJti}|${expEpoch}|${newSig}`;
+
+      const newPass: QRPassTokenItem = {
+        token_jti: tokenJti,
+        booking_reference: target.booking_reference,
+        qr_signature: newSig,
+        qr_payload: newPayload,
+        issued_at: now.toISOString(),
+        expires_at: expiresAt.toISOString(),
+        is_revoked: false,
+        revoked_at: null,
+        revoked_reason: null,
+        entry_used_at: target.qr_pass?.entry_used_at || target.checked_in_at || null,
+        exit_used_at: target.qr_pass?.exit_used_at || target.checked_out_at || null,
+      };
+
+      const nextBookings = bookings.map((b) =>
+        b.booking_reference === target.booking_reference
+          ? {
+              ...b,
+              qr_signature: newSig,
+              qr_payload: newPayload,
+              qr_pass: newPass,
+            }
+          : b
+      );
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || profile.email,
+        actor_role: authUser?.role || activeRole,
+        action: "QR_PASS_ROTATED",
+        target_resource: `${target.booking_reference} (${tokenJti})`,
+        details: `Rotated signed time-limited QR pass with ${ttlMinutes}m TTL (previous token revoked).`,
+        created_at: now.toISOString(),
+      };
+      const nextAudits = [nextAudit, ...auditLogs];
+      setBookings(nextBookings);
+      setAuditLogs(nextAudits);
+      persistState(lots, nextBookings, gateLogs, nextAudits);
+      return newPass;
+    },
+    [bookings, auditLogs, authUser, profile.email, activeRole, lots, gateLogs, persistState]
+  );
+
+  const revokeQRPass = useCallback(
+    async (
+      bookingReference: string,
+      reason: string
+    ): Promise<QRPassTokenItem> => {
+      const target = bookings.find(
+        (b) =>
+          b.booking_reference.toUpperCase() ===
+          bookingReference.trim().toUpperCase()
+      );
+      if (!target || !target.qr_pass) {
+        throw new Error("Active QR pass not found for this booking.");
+      }
+      const nowIso = new Date().toISOString();
+      const revokedPass: QRPassTokenItem = {
+        ...target.qr_pass,
+        is_revoked: true,
+        revoked_at: nowIso,
+        revoked_reason: reason.trim() || "Revoked by gate security staff",
+      };
+      const nextBookings = bookings.map((b) =>
+        b.booking_reference === target.booking_reference
+          ? { ...b, qr_pass: revokedPass }
+          : b
+      );
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || "gate@parkwise.in",
+        actor_role: authUser?.role || activeRole,
+        action: "QR_PASS_REVOKED",
+        target_resource: `${target.booking_reference} (${revokedPass.token_jti})`,
+        details: `Revoked QR pass token: ${revokedPass.revoked_reason}`,
+        created_at: nowIso,
+      };
+      const nextAudits = [nextAudit, ...auditLogs];
+      setBookings(nextBookings);
+      setAuditLogs(nextAudits);
+      persistState(lots, nextBookings, gateLogs, nextAudits);
+      return revokedPass;
+    },
+    [bookings, auditLogs, authUser, activeRole, lots, gateLogs, persistState]
+  );
+
+  const expireQRPassForDemo = useCallback(
+    async (bookingReference: string): Promise<QRPassTokenItem> => {
+      const target = bookings.find(
+        (b) =>
+          b.booking_reference.toUpperCase() ===
+          bookingReference.trim().toUpperCase()
+      );
+      if (!target || !target.qr_pass) {
+        throw new Error("Active QR pass not found for this booking.");
+      }
+      const pastIso = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const expiredPass: QRPassTokenItem = {
+        ...target.qr_pass,
+        expires_at: pastIso,
+      };
+      const nextBookings = bookings.map((b) =>
+        b.booking_reference === target.booking_reference
+          ? { ...b, qr_pass: expiredPass }
+          : b
+      );
+      setBookings(nextBookings);
+      persistState(lots, nextBookings, gateLogs, auditLogs);
+      return expiredPass;
+    },
+    [bookings, lots, gateLogs, auditLogs, persistState]
+  );
+
+  const manualGateOverride = useCallback(
+    async (params: {
+      lotId: number;
+      bookingReference?: string;
+      vehicleNumber: string;
+      action: "OPEN_ENTRY" | "OPEN_EXIT" | "LOCK_LANE";
+      gateLane?: string;
+      overrideReason: string;
+    }): Promise<GateLogEntry> => {
+      if (!hasPermission("gate:override")) {
+        throw new Error(
+          `RBAC Permission Denied: Role '${authUser?.role || activeRole}' lacks 'gate:override' authorization. Switch to GATE_STAFF, OPERATOR, or ADMIN.`
+        );
+      }
+      const cleanReason = params.overrideReason.trim();
+      if (cleanReason.length < 5) {
+        throw new Error(
+          "Please provide a supervisor justification (at least 5 characters) for the audit trail."
+        );
+      }
+      const cleanPlate = params.vehicleNumber.trim().toUpperCase();
+      const nowIso = new Date().toISOString();
+      const lane = params.gateLane || "LANE-01 (ANPR+FASTag)";
+      const barrierAction: "OPENED" | "LOCKED" =
+        params.action === "LOCK_LANE" ? "LOCKED" : "OPENED";
+
+      let nextBookings = [...bookings];
+      let nextLots = [...lots];
+      const refClean = params.bookingReference?.trim().toUpperCase();
+
+      if (refClean) {
+        const matched = bookings.find(
+          (b) => b.booking_reference.toUpperCase() === refClean
+        );
+        if (matched) {
+          nextBookings = bookings.map((b) => {
+            if (b.booking_reference !== matched.booking_reference) return b;
+            if (params.action === "OPEN_ENTRY") {
+              return {
+                ...b,
+                status: "ACTIVE" as const,
+                checked_in_at: b.checked_in_at || nowIso,
+              };
+            }
+            if (params.action === "OPEN_EXIT") {
+              return {
+                ...b,
+                status: "COMPLETED" as const,
+                checked_out_at: b.checked_out_at || nowIso,
+              };
+            }
+            return b;
+          });
+          nextLots = lots.map((l) => {
+            if (l.id !== matched.lot_id) return l;
+            const updatedSlots = l.slots.map((s) => {
+              if (s.id !== matched.slot_id) return s;
+              if (params.action === "OPEN_ENTRY") {
+                return { ...s, status: "OCCUPIED" as SlotStatus };
+              }
+              if (params.action === "OPEN_EXIT") {
+                return { ...s, status: "AVAILABLE" as SlotStatus };
+              }
+              return s;
+            });
+            return recalculateLotCounts({ ...l, slots: updatedSlots });
+          });
+        }
+      }
+
+      const overrideLog: GateLogEntry = {
+        id: gateLogs.length + 1,
+        lot_id: params.lotId,
+        booking_reference: refClean || "MANUAL-SUPERVISOR",
+        vehicle_number: cleanPlate,
+        event_type: "MANUAL_OVERRIDE",
+        gate_lane: lane,
+        anpr_confidence: 1.0,
+        verification_method: `STAFF_OVERRIDE (${authUser?.role || activeRole})`,
+        barrier_action: barrierAction,
+        staff_override_by: authUser?.email || "gate@parkwise.in",
+        override_reason: cleanReason,
+        notes: `Manual barrier ${params.action} by ${authUser?.email || "gate@parkwise.in"}: ${cleanReason}`,
+        timestamp: nowIso,
+      };
+
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || "gate@parkwise.in",
+        actor_role: authUser?.role || activeRole,
+        action: `GATE_MANUAL_${params.action}`,
+        target_resource: `${lane} • ${cleanPlate}`,
+        details: `Manual barrier override (${barrierAction}): ${cleanReason}`,
+        created_at: nowIso,
+      };
+
+      const nextGateLogs = [overrideLog, ...gateLogs];
+      const nextAudits = [nextAudit, ...auditLogs];
+      setBookings(nextBookings);
+      setLots(nextLots);
+      setGateLogs(nextGateLogs);
+      setAuditLogs(nextAudits);
+      persistState(nextLots, nextBookings, nextGateLogs, nextAudits);
+      return overrideLog;
+    },
+    [hasPermission, authUser, activeRole, bookings, lots, gateLogs, auditLogs, persistState]
+  );
+
+  const queueOfflineGateScan = useCallback(
+    (params: {
+      bookingReference: string;
+      qrSignature: string;
+      vehicleNumber: string;
+      action: "ENTRY" | "EXIT";
+      gateLane?: string;
+    }): OfflineGateQueueItem => {
+      const refClean = params.bookingReference.trim().toUpperCase();
+      const matched = bookings.find(
+        (b) => b.booking_reference.toUpperCase() === refClean
+      );
+      const item: OfflineGateQueueItem = {
+        offline_event_id: `off_evt_${Date.now().toString(16)}_${Math.floor(100 + Math.random() * 900)}`,
+        lot_id: matched?.lot_id || 1,
+        booking_reference: refClean,
+        vehicle_number: params.vehicleNumber.trim().toUpperCase(),
+        action: params.action,
+        qr_signature: params.qrSignature.trim(),
+        token_jti: matched?.qr_pass?.token_jti || null,
+        gate_lane: params.gateLane || "LANE-01 (OFFLINE EDGE)",
+        occurred_at: new Date().toISOString(),
+        queued_status: "PENDING_SYNC",
+      };
+      setOfflineGateQueue((prev) => [...prev, item]);
+      return item;
+    },
+    [bookings]
+  );
+
+  const syncOfflineGateQueue = useCallback(async (): Promise<
+    OfflineSyncReportItem[]
+  > => {
+    const reports: OfflineSyncReportItem[] = [];
+    let workingBookings = [...bookings];
+    let workingLots = [...lots];
+    const newLogs: GateLogEntry[] = [];
+    const updatedQueue: OfflineGateQueueItem[] = [];
+
+    for (const item of offlineGateQueue) {
+      if (item.queued_status === "SYNCED") {
+        reports.push({
+          offline_event_id: item.offline_event_id,
+          booking_reference: item.booking_reference,
+          action: item.action,
+          occurred_at: item.occurred_at,
+          resolution: "IDEMPOTENT_ALREADY_SYNCED",
+          detail: "Offline event was already synchronized in an earlier batch.",
+          overstay_fee_inr: 0,
+        });
+        updatedQueue.push(item);
+        continue;
+      }
+
+      const booking = workingBookings.find(
+        (b) =>
+          b.booking_reference.toUpperCase() ===
+          item.booking_reference.toUpperCase()
+      );
+      if (
+        !booking ||
+        booking.status === "CANCELLED" ||
+        booking.status === "PENDING_PAYMENT"
+      ) {
+        const resCode = "REJECTED_UNPAID_OR_CANCELLED" as const;
+        const detail =
+          "Offline scan rejected during cloud sync: booking is unpaid, cancelled, or unknown.";
+        reports.push({
+          offline_event_id: item.offline_event_id,
+          booking_reference: item.booking_reference,
+          action: item.action,
+          occurred_at: item.occurred_at,
+          resolution: resCode,
+          detail,
+          overstay_fee_inr: 0,
+        });
+        updatedQueue.push({
+          ...item,
+          queued_status: "REJECTED",
+          resolution_code: resCode,
+          resolution_detail: detail,
+        });
+        continue;
+      }
+
+      const expectedSig = generateDeterministicSignature(
+        booking.booking_reference,
+        booking.slot_id,
+        booking.vehicle_number
+      );
+      const sigOk =
+        item.qr_signature === booking.qr_signature ||
+        item.qr_signature === expectedSig ||
+        item.qr_signature === booking.qr_pass?.qr_signature;
+
+      if (!sigOk) {
+        const resCode = "REJECTED_INVALID_SIGNATURE" as const;
+        const detail =
+          "Offline scan rejected: cryptographic HMAC signature mismatch.";
+        reports.push({
+          offline_event_id: item.offline_event_id,
+          booking_reference: item.booking_reference,
+          action: item.action,
+          occurred_at: item.occurred_at,
+          resolution: resCode,
+          detail,
+          overstay_fee_inr: 0,
+        });
+        updatedQueue.push({
+          ...item,
+          queued_status: "REJECTED",
+          resolution_code: resCode,
+          resolution_detail: detail,
+        });
+        continue;
+      }
+
+      if (
+        booking.qr_pass?.is_revoked ||
+        (booking.qr_pass?.expires_at &&
+          new Date(booking.qr_pass.expires_at).getTime() <
+            new Date(item.occurred_at).getTime())
+      ) {
+        const resCode = "REJECTED_EXPIRED_OR_REVOKED" as const;
+        const detail =
+          "Offline scan rejected: QR pass token was revoked or expired at scan time.";
+        reports.push({
+          offline_event_id: item.offline_event_id,
+          booking_reference: item.booking_reference,
+          action: item.action,
+          occurred_at: item.occurred_at,
+          resolution: resCode,
+          detail,
+          overstay_fee_inr: 0,
+        });
+        updatedQueue.push({
+          ...item,
+          queued_status: "REJECTED",
+          resolution_code: resCode,
+          resolution_detail: detail,
+        });
+        continue;
+      }
+
+      if (item.action === "ENTRY") {
+        if (
+          booking.checked_in_at ||
+          booking.status === "ACTIVE" ||
+          booking.status === "COMPLETED"
+        ) {
+          const resCode = "CONFLICT_DUPLICATE_REPLAY" as const;
+          const detail =
+            "Conflict detected: duplicate offline ENTRY replay blocked because vehicle already checked in.";
+          reports.push({
+            offline_event_id: item.offline_event_id,
+            booking_reference: item.booking_reference,
+            action: item.action,
+            occurred_at: item.occurred_at,
+            resolution: resCode,
+            detail,
+            overstay_fee_inr: 0,
+          });
+          updatedQueue.push({
+            ...item,
+            queued_status: "CONFLICT",
+            resolution_code: resCode,
+            resolution_detail: detail,
+          });
+          continue;
+        }
+
+        workingBookings = workingBookings.map((b) =>
+          b.booking_reference === booking.booking_reference
+            ? {
+                ...b,
+                status: "ACTIVE" as const,
+                checked_in_at: item.occurred_at,
+                qr_pass: b.qr_pass
+                  ? { ...b.qr_pass, entry_used_at: item.occurred_at }
+                  : null,
+              }
+            : b
+        );
+        workingLots = workingLots.map((l) => {
+          if (l.id !== booking.lot_id) return l;
+          return recalculateLotCounts({
+            ...l,
+            slots: l.slots.map((s) =>
+              s.id === booking.slot_id
+                ? { ...s, status: "OCCUPIED" as SlotStatus }
+                : s
+            ),
+          });
+        });
+
+        const detail = `Synchronized offline ENTRY at ${new Date(item.occurred_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}.`;
+        newLogs.push({
+          id: gateLogs.length + newLogs.length + 1,
+          lot_id: booking.lot_id,
+          booking_reference: booking.booking_reference,
+          vehicle_number: item.vehicle_number,
+          event_type: "ENTRY",
+          gate_lane: item.gate_lane,
+          anpr_confidence: 0.985,
+          verification_method: "OFFLINE_SIGNED_QR_SYNC",
+          barrier_action: "OPENED",
+          offline_event_id: item.offline_event_id,
+          synced_from_offline: true,
+          notes: detail,
+          timestamp: item.occurred_at,
+        });
+        reports.push({
+          offline_event_id: item.offline_event_id,
+          booking_reference: item.booking_reference,
+          action: item.action,
+          occurred_at: item.occurred_at,
+          resolution: "SYNCED_APPLIED",
+          detail,
+          overstay_fee_inr: 0,
+        });
+        updatedQueue.push({
+          ...item,
+          queued_status: "SYNCED",
+          resolution_code: "SYNCED_APPLIED",
+          resolution_detail: detail,
+        });
+      } else {
+        if (booking.checked_out_at || booking.status === "COMPLETED") {
+          const resCode = "CONFLICT_DUPLICATE_REPLAY" as const;
+          const detail =
+            "Conflict detected: duplicate offline EXIT replay blocked because vehicle already checked out.";
+          reports.push({
+            offline_event_id: item.offline_event_id,
+            booking_reference: item.booking_reference,
+            action: item.action,
+            occurred_at: item.occurred_at,
+            resolution: resCode,
+            detail,
+            overstay_fee_inr: 0,
+          });
+          updatedQueue.push({
+            ...item,
+            queued_status: "CONFLICT",
+            resolution_code: resCode,
+            resolution_detail: detail,
+          });
+          continue;
+        }
+
+        workingBookings = workingBookings.map((b) =>
+          b.booking_reference === booking.booking_reference
+            ? {
+                ...b,
+                status: "COMPLETED" as const,
+                checked_out_at: item.occurred_at,
+                qr_pass: b.qr_pass
+                  ? { ...b.qr_pass, exit_used_at: item.occurred_at }
+                  : null,
+              }
+            : b
+        );
+        workingLots = workingLots.map((l) => {
+          if (l.id !== booking.lot_id) return l;
+          return recalculateLotCounts({
+            ...l,
+            slots: l.slots.map((s) =>
+              s.id === booking.slot_id
+                ? { ...s, status: "AVAILABLE" as SlotStatus }
+                : s
+            ),
+          });
+        });
+
+        const detail = `Synchronized offline EXIT at ${new Date(item.occurred_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}.`;
+        newLogs.push({
+          id: gateLogs.length + newLogs.length + 1,
+          lot_id: booking.lot_id,
+          booking_reference: booking.booking_reference,
+          vehicle_number: item.vehicle_number,
+          event_type: "EXIT",
+          gate_lane: item.gate_lane,
+          anpr_confidence: 0.985,
+          verification_method: "OFFLINE_SIGNED_QR_SYNC",
+          barrier_action: "OPENED",
+          offline_event_id: item.offline_event_id,
+          synced_from_offline: true,
+          notes: detail,
+          timestamp: item.occurred_at,
+        });
+        reports.push({
+          offline_event_id: item.offline_event_id,
+          booking_reference: item.booking_reference,
+          action: item.action,
+          occurred_at: item.occurred_at,
+          resolution: "SYNCED_APPLIED",
+          detail,
+          overstay_fee_inr: 0,
+        });
+        updatedQueue.push({
+          ...item,
+          queued_status: "SYNCED",
+          resolution_code: "SYNCED_APPLIED",
+          resolution_detail: detail,
+        });
+      }
+    }
+
+    const nextGateLogs = [...newLogs.reverse(), ...gateLogs];
+    setOfflineGateQueue(updatedQueue);
+    setBookings(workingBookings);
+    setLots(workingLots);
+    setGateLogs(nextGateLogs);
+    persistState(workingLots, workingBookings, nextGateLogs, auditLogs);
+    return reports;
+  }, [offlineGateQueue, bookings, lots, gateLogs, auditLogs, persistState]);
+
+  const triggerRazorpayWebhook = useCallback(
+    async (params: {
+      webhookEventId: string;
+      eventType: "payment.captured" | "payment.failed" | "refund.processed";
+      bookingReference: string;
+      tamperSignature?: boolean;
+    }): Promise<PaymentWebhookLogItem> => {
+      const cleanEventId = params.webhookEventId.trim();
+      if (!cleanEventId) {
+        throw new Error("Webhook event ID is required.");
+      }
+      if (params.tamperSignature) {
+        throw new Error(
+          "Untrusted Webhook Rejected (HTTP 400): Invalid X-Razorpay-Signature HMAC-SHA256 header."
+        );
+      }
+      const target = bookings.find(
+        (b) =>
+          b.booking_reference.toUpperCase() ===
+          params.bookingReference.trim().toUpperCase()
+      );
+      if (!target) {
+        throw new Error("Booking referenced by webhook not found.");
+      }
+
+      // Idempotency check
+      const existing = webhookLogs.find(
+        (w) => w.webhook_event_id === cleanEventId
+      );
+      if (existing) {
+        const replayEntry: PaymentWebhookLogItem = {
+          ...existing,
+          idempotent_replay: true,
+        };
+        setWebhookLogs((prev) =>
+          prev.map((w) =>
+            w.webhook_event_id === cleanEventId ? replayEntry : w
+          )
+        );
+        return replayEntry;
+      }
+
+      const nowIso = new Date().toISOString();
+      let statusApplied = "CAPTURED";
+      if (params.eventType === "payment.failed") statusApplied = "FAILED";
+      if (params.eventType === "refund.processed") statusApplied = "REFUNDED";
+
+      const nextBookings = bookings.map((b) => {
+        if (b.booking_reference !== target.booking_reference) return b;
+        if (params.eventType === "payment.captured") {
+          return {
+            ...b,
+            status:
+              b.status === "PENDING_PAYMENT" ? ("CONFIRMED" as const) : b.status,
+            payment: {
+              ...b.payment,
+              status: "CAPTURED" as const,
+              verified_at: nowIso,
+            },
+          };
+        }
+        if (params.eventType === "payment.failed") {
+          return {
+            ...b,
+            payment: {
+              ...b.payment,
+              status: "FAILED" as const,
+            },
+          };
+        }
+        return {
+          ...b,
+          status: "CANCELLED" as const,
+          payment: {
+            ...b.payment,
+            status: "REFUNDED" as const,
+            refund_id: `rfnd_wh_${Date.now().toString(16).slice(-6)}`,
+            refund_amount_inr: b.total_amount_inr,
+            refund_reason: "Processed via Razorpay refund.processed webhook",
+            refunded_at: nowIso,
+          },
+        };
+      });
+
+      const logItem: PaymentWebhookLogItem = {
+        id: webhookLogs.length + 1,
+        webhook_event_id: cleanEventId,
+        event_type: params.eventType,
+        razorpay_order_id: target.payment.razorpay_order_id,
+        razorpay_payment_id:
+          target.payment.razorpay_payment_id || `pay_wh_${Date.now().toString(16).slice(-6)}`,
+        booking_reference: target.booking_reference,
+        signature_verified: true,
+        idempotent_replay: false,
+        status_applied: statusApplied,
+        processed_at: nowIso,
+      };
+
+      setWebhookLogs((prev) => [logItem, ...prev]);
+      setBookings(nextBookings);
+      persistState(lots, nextBookings, gateLogs, auditLogs);
+      return logItem;
+    },
+    [bookings, webhookLogs, lots, gateLogs, auditLogs, persistState]
+  );
+
+  const refundBookingPayment = useCallback(
+    async (
+      bookingReference: string,
+      reason: string,
+      amountInr?: number
+    ): Promise<Booking> => {
+      const target = bookings.find(
+        (b) =>
+          b.booking_reference.toUpperCase() ===
+          bookingReference.trim().toUpperCase()
+      );
+      if (!target) throw new Error("Booking not found.");
+      if (target.payment.status === "REFUNDED") {
+        throw new Error(
+          `Payment for ${target.booking_reference} has already been refunded.`
+        );
+      }
+      const refundAmt =
+        amountInr && amountInr > 0
+          ? Math.min(amountInr, target.total_amount_inr)
+          : target.total_amount_inr;
+      const nowIso = new Date().toISOString();
+      const refundId = `rfnd_pw_${Date.now().toString(16).slice(-8)}`;
+
+      const updated: Booking = {
+        ...target,
+        status:
+          target.status === "CONFIRMED" || target.status === "PENDING_PAYMENT"
+            ? "CANCELLED"
+            : target.status,
+        qr_pass: target.qr_pass
+          ? {
+              ...target.qr_pass,
+              is_revoked: true,
+              revoked_at: nowIso,
+              revoked_reason: "Payment refunded",
+            }
+          : null,
+        payment: {
+          ...target.payment,
+          status: "REFUNDED",
+          refund_id: refundId,
+          refund_amount_inr: refundAmt,
+          refund_reason: reason.trim() || "Customer refund request",
+          refunded_at: nowIso,
+        },
+      };
+
+      const nextBookings = bookings.map((b) =>
+        b.booking_reference === target.booking_reference ? updated : b
+      );
+      const nextLots = lots.map((l) => {
+        if (l.id !== target.lot_id) return l;
+        return recalculateLotCounts({
+          ...l,
+          slots: l.slots.map((s) =>
+            s.id === target.slot_id && s.status === "RESERVED"
+              ? { ...s, status: "AVAILABLE" as SlotStatus }
+              : s
+          ),
+        });
+      });
+
+      const nextAudit: AuditLogItem = {
+        id: auditLogs.length + 1,
+        actor_email: authUser?.email || profile.email,
+        actor_role: authUser?.role || activeRole,
+        action: "PAYMENT_REFUND_ISSUED",
+        target_resource: `${target.booking_reference} (${refundId})`,
+        details: `Issued Razorpay refund of ₹${refundAmt} (${reason.trim() || "Refund"}).`,
+        created_at: nowIso,
+      };
+      const nextAudits = [nextAudit, ...auditLogs];
+      setBookings(nextBookings);
+      setLots(nextLots);
+      setAuditLogs(nextAudits);
+      persistState(nextLots, nextBookings, gateLogs, nextAudits);
+      return updated;
+    },
+    [bookings, lots, auditLogs, authUser, profile.email, activeRole, gateLogs, persistState]
+  );
+
+  const getPaymentReceipt = useCallback(
+    (bookingReference: string): PaymentReceiptData => {
+      const b =
+        bookings.find(
+          (item) =>
+            item.booking_reference.toUpperCase() ===
+            bookingReference.trim().toUpperCase()
+        ) || bookings[0];
+      const cgst = Math.round((b.gst_amount_inr / 2) * 100) / 100;
+      const sgst = Math.round((b.gst_amount_inr - cgst) * 100) / 100;
+      const refunded = b.payment.refund_amount_inr || 0;
+      const netPaid = Math.max(
+        0,
+        Math.round((b.total_amount_inr - refunded) * 100) / 100
+      );
+      const receiptNo =
+        b.payment.receipt_number || `PW-GST-20261111-${String(b.id).padStart(4, "0")}`;
+
+      return {
+        receipt_number: receiptNo,
+        booking_reference: b.booking_reference,
+        razorpay_order_id: b.payment.razorpay_order_id,
+        razorpay_payment_id: b.payment.razorpay_payment_id || null,
+        payment_method: b.payment.payment_method,
+        upi_vpa: b.payment.upi_vpa || "aarav.sharma@okicici",
+        payment_status: b.payment.status,
+        lot_name: b.lot_name,
+        city: b.city,
+        slot_number: b.slot_number,
+        vehicle_number: b.vehicle_number,
+        driver_name: b.driver_name,
+        driver_phone: b.driver_phone,
+        start_time: b.start_time,
+        end_time: b.end_time,
+        duration_hours: b.duration_hours,
+        base_amount_inr: b.base_amount_inr,
+        surge_multiplier: b.surge_multiplier,
+        additional_charges_inr: b.additional_charges_inr || 0,
+        overstay_fee_inr: b.overstay_fee_inr,
+        cgst_9_pct_inr: cgst,
+        sgst_9_pct_inr: sgst,
+        total_gst_18_pct_inr: b.gst_amount_inr,
+        total_amount_inr: b.total_amount_inr,
+        refunded_amount_inr: refunded,
+        net_paid_inr: netPaid,
+        gstin_operator: "07AABCP9981K1Z5",
+        sac_code: "996749",
+        issued_at: b.payment.verified_at || b.created_at,
+        verification_hash: b.qr_signature.slice(0, 32),
+      };
+    },
+    [bookings]
+  );
+
   const value = useMemo(
     () => ({
       lots,
@@ -2947,6 +4011,19 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       updateProfile,
       markAllNotificationsRead,
       processGateScan,
+      issueOrRotateQRPass,
+      revokeQRPass,
+      expireQRPassForDemo,
+      manualGateOverride,
+      offlineMode,
+      setOfflineMode,
+      offlineGateQueue,
+      queueOfflineGateScan,
+      syncOfflineGateQueue,
+      webhookLogs,
+      triggerRazorpayWebhook,
+      refundBookingPayment,
+      getPaymentReceipt,
       updateSlotStatus,
       updateLotSurge,
       getAIForecast,
@@ -2996,6 +4073,19 @@ export function ParkwiseProvider({ children }: { children: React.ReactNode }) {
       updateProfile,
       markAllNotificationsRead,
       processGateScan,
+      issueOrRotateQRPass,
+      revokeQRPass,
+      expireQRPassForDemo,
+      manualGateOverride,
+      offlineMode,
+      setOfflineMode,
+      offlineGateQueue,
+      queueOfflineGateScan,
+      syncOfflineGateQueue,
+      webhookLogs,
+      triggerRazorpayWebhook,
+      refundBookingPayment,
+      getPaymentReceipt,
       updateSlotStatus,
       updateLotSurge,
       getAIForecast,

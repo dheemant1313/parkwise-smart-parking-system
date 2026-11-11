@@ -399,6 +399,9 @@ class Booking(Base):
     events = relationship(
         "BookingEvent", back_populates="booking", cascade="all, delete-orphan"
     )
+    qr_passes = relationship(
+        "QRPassToken", back_populates="booking", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_booking_slot_window", "slot_id", "start_time", "end_time"),
@@ -431,12 +434,52 @@ class Payment(Base):
     amount_inr = Column(Float, nullable=False)
     currency = Column(String(8), default="INR", nullable=False)
     payment_method = Column(String(40), default="UPI / Razorpay", nullable=False)
+    upi_vpa = Column(String(80), nullable=True)
+    receipt_number = Column(String(48), nullable=True, index=True)
     status = Column(Enum(PaymentStatus), default=PaymentStatus.CREATED, nullable=False)
     is_simulated = Column(Boolean, default=True, nullable=False)
+    refund_id = Column(String(80), nullable=True)
+    refund_amount_inr = Column(Float, default=0.0, nullable=False)
+    refund_reason = Column(Text, nullable=True)
+    refunded_at = Column(DateTime(timezone=True), nullable=True)
     verified_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
 
     booking = relationship("Booking", back_populates="payment")
+
+
+class PaymentWebhookEvent(Base):
+    __tablename__ = "payment_webhook_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    webhook_event_id = Column(String(80), unique=True, index=True, nullable=False)
+    event_type = Column(String(48), nullable=False)
+    razorpay_order_id = Column(String(80), index=True, nullable=False)
+    razorpay_payment_id = Column(String(80), nullable=True)
+    signature_verified = Column(Boolean, default=True, nullable=False)
+    status_applied = Column(String(32), nullable=False)
+    payload_summary = Column(Text, nullable=True)
+    processed_at = Column(DateTime(timezone=True), default=utc_now)
+
+
+class QRPassToken(Base):
+    __tablename__ = "qr_pass_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False, index=True)
+    booking_reference = Column(String(36), index=True, nullable=False)
+    token_jti = Column(String(64), unique=True, index=True, nullable=False)
+    qr_signature = Column(String(255), nullable=False)
+    qr_payload = Column(Text, nullable=False)
+    issued_at = Column(DateTime(timezone=True), default=utc_now)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    entry_used_at = Column(DateTime(timezone=True), nullable=True)
+    exit_used_at = Column(DateTime(timezone=True), nullable=True)
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    revoked_reason = Column(String(160), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    booking = relationship("Booking", back_populates="qr_passes")
 
 
 class GateLog(Base):
@@ -446,11 +489,16 @@ class GateLog(Base):
     lot_id = Column(Integer, ForeignKey("parking_lots.id"), nullable=False, index=True)
     booking_reference = Column(String(36), nullable=True, index=True)
     vehicle_number = Column(String(24), nullable=False)
-    event_type = Column(String(24), nullable=False)  # ENTRY, EXIT, DENIED, OVERRIDE
+    event_type = Column(String(48), nullable=False)  # ENTRY, EXIT, DENIED_*, MANUAL_OVERRIDE
     gate_lane = Column(String(32), default="LANE-01 (ANPR+FASTag)", nullable=False)
     anpr_confidence = Column(Float, default=0.96, nullable=False)
-    verification_method = Column(String(40), default="QR_HMAC + ANPR", nullable=False)
+    verification_method = Column(String(48), default="QR_HMAC + ANPR", nullable=False)
     barrier_action = Column(String(24), default="OPENED", nullable=False)
+    overstay_fee_inr = Column(Float, default=0.0, nullable=False)
+    client_event_id = Column(String(80), unique=True, index=True, nullable=True)
+    staff_override_by = Column(String(160), nullable=True)
+    staff_override_reason = Column(Text, nullable=True)
+    sync_status = Column(String(32), default="LIVE_ONLINE", nullable=False)
     notes = Column(Text, nullable=True)
     timestamp = Column(DateTime(timezone=True), default=utc_now)
 

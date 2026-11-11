@@ -536,11 +536,37 @@ class SlotRecommendationItem(BaseModel):
 class PaymentSummary(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: Optional[str] = None
+    razorpay_signature: Optional[str] = None
     amount_inr: float
     currency: str
     payment_method: str
+    upi_vpa: Optional[str] = None
+    receipt_number: Optional[str] = None
     status: PaymentStatus
     is_simulated: bool
+    refund_id: Optional[str] = None
+    refund_amount_inr: float = 0.0
+    refund_reason: Optional[str] = None
+    refunded_at: Optional[datetime] = None
+    verified_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class QRPassResponse(BaseModel):
+    id: int
+    booking_id: int
+    booking_reference: str
+    token_jti: str
+    qr_signature: str
+    qr_payload: str
+    issued_at: datetime
+    expires_at: datetime
+    entry_used_at: Optional[datetime] = None
+    exit_used_at: Optional[datetime] = None
+    is_revoked: bool
+    revoked_reason: Optional[str] = None
+    revoked_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -576,8 +602,31 @@ class BookingResponse(BaseModel):
     created_at: datetime
     payment: Optional[PaymentSummary] = None
     events: List[BookingEventResponse] = []
+    qr_pass: Optional[QRPassResponse] = None
 
     model_config = {"from_attributes": True}
+
+
+class PaymentOrderCreateRequest(BaseModel):
+    booking_reference: str
+    payment_method: str = Field("UPI / Razorpay Checkout", max_length=64)
+    upi_vpa: Optional[str] = Field("driver.okaxis@upi", max_length=80)
+
+
+class PaymentOrderResponse(BaseModel):
+    booking_reference: str
+    razorpay_key_id: str
+    razorpay_order_id: str
+    amount_inr: float
+    amount_paise: int
+    currency: str
+    payment_method: str
+    upi_vpa: Optional[str] = None
+    upi_intent_uri: str
+    status: PaymentStatus
+    is_test_mode: bool = True
+    test_payment_id_suggestion: str
+    test_signature_preview: str
 
 
 class PaymentVerifyRequest(BaseModel):
@@ -586,12 +635,95 @@ class PaymentVerifyRequest(BaseModel):
     razorpay_payment_id: str
     razorpay_signature: Optional[str] = None
     payment_method: str = "UPI / FASTag Auto-Debit"
+    upi_vpa: Optional[str] = None
+
+
+class RazorpayWebhookRequest(BaseModel):
+    webhook_event_id: str = Field(..., min_length=4, max_length=80)
+    event_type: str = Field(
+        ...,
+        pattern="^(payment\\.captured|payment\\.failed|refund\\.processed)$",
+    )
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    payment_method: str = "UPI / Webhook Auto-Capture"
+    upi_vpa: Optional[str] = "npci.fastag@icici"
+    refund_amount_inr: Optional[float] = None
+
+
+class RazorpayWebhookResponse(BaseModel):
+    webhook_event_id: str
+    event_type: str
+    idempotent_replay: bool
+    signature_verified: bool
+    booking_reference: str
+    booking_status: str
+    payment_status: str
+    processed_at: datetime
+
+
+class PaymentRefundRequest(BaseModel):
+    refund_amount_inr: Optional[float] = Field(None, gt=0)
+    reason: str = Field(
+        "Customer requested cancellation / slot release refund",
+        min_length=3,
+        max_length=240,
+    )
+
+
+class PaymentReceiptResponse(BaseModel):
+    receipt_number: str
+    booking_reference: str
+    issued_at: datetime
+    lot_name: str
+    lot_code: str
+    city: str
+    slot_number: str
+    driver_name: str
+    driver_phone: str
+    vehicle_number: str
+    sac_code: str = "996749"
+    base_amount_inr: float
+    additional_charges_inr: float
+    overstay_fee_inr: float
+    cgst_9_pct_inr: float
+    sgst_9_pct_inr: float
+    gst_total_inr: float
+    total_paid_inr: float
+    refund_amount_inr: float
+    payment_method: str
+    upi_vpa: Optional[str] = None
+    razorpay_order_id: str
+    razorpay_payment_id: Optional[str] = None
+    payment_status: str
+    cryptographic_receipt_hash: str
+
+
+class QRPassIssueRequest(BaseModel):
+    ttl_minutes: int = Field(180, ge=5, le=1440)
+
+
+class QRPassRevokeRequest(BaseModel):
+    reason: str = Field(
+        "Revoked by driver or security administrator",
+        min_length=3,
+        max_length=160,
+    )
+
+
+class QRPassVerifyRequest(BaseModel):
+    booking_reference: str
+    qr_signature: str
+    token_jti: Optional[str] = None
+    vehicle_number: Optional[str] = None
+    action: str = Field("ENTRY", pattern="^(ENTRY|EXIT)$")
 
 
 class GateScanRequest(BaseModel):
     lot_id: int
     booking_reference: str
     qr_signature: str
+    token_jti: Optional[str] = None
     vehicle_number: str
     action: str = Field(..., pattern="^(ENTRY|EXIT)$")
     gate_lane: str = "LANE-01 (ANPR+FASTag)"
@@ -606,8 +738,68 @@ class GateScanResponse(BaseModel):
     slot_number: str
     anpr_confidence: float
     overstay_fee_inr: float
+    checked_in_at: Optional[datetime] = None
+    checked_out_at: Optional[datetime] = None
+    token_jti: Optional[str] = None
     message: str
     timestamp: datetime
+
+
+class GateManualOverrideRequest(BaseModel):
+    lot_id: int = Field(..., gt=0)
+    booking_reference: Optional[str] = None
+    vehicle_number: str = Field(..., min_length=6, max_length=20)
+    barrier_action: str = Field("OPENED", pattern="^(OPENED|LOCKED)$")
+    gate_lane: str = "LANE-01 (Manual Supervisor Override)"
+    reason: str = Field(..., min_length=5, max_length=240)
+
+
+class GateManualOverrideResponse(BaseModel):
+    log_id: int
+    lot_id: int
+    booking_reference: Optional[str] = None
+    vehicle_number: str
+    barrier_action: str
+    authorized_by_email: str
+    authorized_by_role: str
+    reason: str
+    timestamp: datetime
+
+
+class OfflineGateEventItem(BaseModel):
+    client_event_id: str = Field(..., min_length=4, max_length=80)
+    lot_id: int = Field(..., gt=0)
+    booking_reference: str
+    qr_signature: str
+    token_jti: Optional[str] = None
+    vehicle_number: str
+    action: str = Field(..., pattern="^(ENTRY|EXIT)$")
+    gate_lane: str = "LANE-01 (OFFLINE_QUEUE)"
+    recorded_at: datetime
+
+
+class OfflineGateSyncRequest(BaseModel):
+    terminal_id: str = Field("GATE-TERM-DEL-01", max_length=64)
+    events: List[OfflineGateEventItem]
+
+
+class OfflineGateSyncResultItem(BaseModel):
+    client_event_id: str
+    booking_reference: str
+    action: str
+    sync_outcome: str  # SYNCED_APPLIED, IDEMPOTENT_ALREADY_SYNCED, CONFLICT_DUPLICATE_REPLAY, REJECTED_INVALID_SIGNATURE, REJECTED_EXPIRED_OR_REVOKED, REJECTED_UNPAID_BOOKING
+    overstay_fee_inr: float = 0.0
+    details: str
+
+
+class OfflineGateSyncResponse(BaseModel):
+    terminal_id: str
+    total_submitted: int
+    synced_count: int
+    conflict_count: int
+    rejected_count: int
+    results: List[OfflineGateSyncResultItem]
+    synced_at: datetime
 
 
 class SlotStatusUpdateRequest(BaseModel):

@@ -241,11 +241,111 @@ export interface ParkingLot {
 export interface PaymentSummary {
   razorpay_order_id: string;
   razorpay_payment_id?: string | null;
+  razorpay_signature?: string | null;
   amount_inr: number;
   currency: string;
   payment_method: string;
+  upi_vpa?: string | null;
+  upi_intent_uri?: string | null;
+  receipt_number?: string | null;
   status: PaymentStatus;
   is_simulated: boolean;
+  refund_id?: string | null;
+  refund_amount_inr?: number | null;
+  refund_reason?: string | null;
+  verified_at?: string | null;
+  refunded_at?: string | null;
+}
+
+export interface QRPassTokenItem {
+  token_jti: string;
+  booking_reference: string;
+  qr_signature: string;
+  qr_payload: string;
+  issued_at: string;
+  expires_at: string;
+  is_revoked: boolean;
+  revoked_at?: string | null;
+  revoked_reason?: string | null;
+  entry_used_at?: string | null;
+  exit_used_at?: string | null;
+}
+
+export interface PaymentWebhookLogItem {
+  id: number;
+  webhook_event_id: string;
+  event_type: "payment.captured" | "payment.failed" | "refund.processed";
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  booking_reference: string;
+  signature_verified: boolean;
+  idempotent_replay: boolean;
+  status_applied: string;
+  processed_at: string;
+}
+
+export interface PaymentReceiptData {
+  receipt_number: string;
+  booking_reference: string;
+  razorpay_order_id: string;
+  razorpay_payment_id?: string | null;
+  payment_method: string;
+  upi_vpa?: string | null;
+  payment_status: string;
+  lot_name: string;
+  city: string;
+  slot_number: string;
+  vehicle_number: string;
+  driver_name: string;
+  driver_phone: string;
+  start_time: string;
+  end_time: string;
+  duration_hours: number;
+  base_amount_inr: number;
+  surge_multiplier: number;
+  additional_charges_inr: number;
+  overstay_fee_inr: number;
+  cgst_9_pct_inr: number;
+  sgst_9_pct_inr: number;
+  total_gst_18_pct_inr: number;
+  total_amount_inr: number;
+  refunded_amount_inr: number;
+  net_paid_inr: number;
+  gstin_operator: string;
+  sac_code: string;
+  issued_at: string;
+  verification_hash: string;
+}
+
+export interface OfflineGateQueueItem {
+  offline_event_id: string;
+  lot_id: number;
+  booking_reference: string;
+  vehicle_number: string;
+  action: "ENTRY" | "EXIT";
+  qr_signature: string;
+  token_jti?: string | null;
+  gate_lane: string;
+  occurred_at: string;
+  queued_status: "PENDING_SYNC" | "SYNCED" | "CONFLICT" | "REJECTED";
+  resolution_code?: string;
+  resolution_detail?: string;
+}
+
+export interface OfflineSyncReportItem {
+  offline_event_id: string;
+  booking_reference: string;
+  action: string;
+  occurred_at: string;
+  resolution:
+    | "SYNCED_APPLIED"
+    | "IDEMPOTENT_ALREADY_SYNCED"
+    | "CONFLICT_DUPLICATE_REPLAY"
+    | "REJECTED_INVALID_SIGNATURE"
+    | "REJECTED_EXPIRED_OR_REVOKED"
+    | "REJECTED_UNPAID_OR_CANCELLED";
+  detail: string;
+  overstay_fee_inr: number;
 }
 
 export interface Booking {
@@ -273,6 +373,7 @@ export interface Booking {
   status: BookingStatus;
   qr_signature: string;
   qr_payload: string;
+  qr_pass?: QRPassTokenItem | null;
   checked_in_at?: string | null;
   checked_out_at?: string | null;
   overstay_fee_inr: number;
@@ -290,12 +391,22 @@ export interface GateLogEntry {
     | "ENTRY"
     | "EXIT"
     | "DENIED_INVALID_SIGNATURE"
+    | "DENIED_EXPIRED_QR_PASS"
+    | "DENIED_REVOKED_QR_PASS"
+    | "DENIED_DUPLICATE_ENTRY"
+    | "DENIED_DUPLICATE_EXIT"
+    | "DENIED_PLATE_MISMATCH"
     | "PRE_AUTH_READY"
     | "MANUAL_OVERRIDE";
   gate_lane: string;
   anpr_confidence: number;
   verification_method: string;
   barrier_action: "OPENED" | "LOCKED" | "STANDBY";
+  staff_override_by?: string | null;
+  override_reason?: string | null;
+  offline_event_id?: string | null;
+  synced_from_offline?: boolean;
+  overstay_fee_inr?: number;
   notes: string;
   timestamp: string;
 }

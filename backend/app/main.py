@@ -48,8 +48,12 @@ from app.models import (
     ParkingOperator,
     ParkingSlot,
     ParkingZone,
+    Payment,
+    PaymentStatus,
+    PaymentWebhookEvent,
     Permission,
     PricingRule,
+    QRPassToken,
     Role,
     RolePermission,
     SlotStatus,
@@ -76,10 +80,15 @@ from app.schemas import (
     DurationAndQuoteResponse,
     EmailVerificationRequest,
     ForgotPasswordRequest,
+    GateManualOverrideRequest,
+    GateManualOverrideResponse,
     GateScanRequest,
     GateScanResponse,
     LocationOpeningHoursUpdateRequest,
     LoginRequest,
+    OfflineGateSyncRequest,
+    OfflineGateSyncResponse,
+    OfflineGateSyncResultItem,
     ParkingBayCreateRequest,
     ParkingFloorCreateRequest,
     ParkingFloorResponse,
@@ -89,10 +98,21 @@ from app.schemas import (
     ParkingOperatorResponse,
     ParkingZoneCreateRequest,
     ParkingZoneResponse,
+    PaymentOrderCreateRequest,
+    PaymentOrderResponse,
+    PaymentReceiptResponse,
+    PaymentRefundRequest,
+    PaymentSummary,
     PaymentVerifyRequest,
     PricingRuleCreateRequest,
     PricingRuleResponse,
     ProfileUpdateRequest,
+    QRPassIssueRequest,
+    QRPassResponse,
+    QRPassRevokeRequest,
+    QRPassVerifyRequest,
+    RazorpayWebhookRequest,
+    RazorpayWebhookResponse,
     RegisterRequest,
     ResetPasswordRequest,
     SessionItemResponse,
@@ -116,12 +136,21 @@ from app.services.booking_service import (
     cancel_transactional_booking,
     check_time_range_availability,
     compute_driver_recommendations,
+    compute_time_limited_qr_signature,
     create_transactional_booking,
     extend_transactional_booking,
+    issue_signed_qr_pass,
     release_expired_reservations,
+    revoke_qr_pass,
     verify_qr_signature,
 )
-from app.services.payment_service import verify_and_capture_payment
+from app.services.payment_service import (
+    create_or_refresh_razorpay_order,
+    generate_payment_receipt,
+    process_idempotent_razorpay_webhook,
+    process_payment_refund,
+    verify_and_capture_payment,
+)
 from app.services.websocket_manager import ws_manager
 
 
@@ -248,9 +277,18 @@ def _serialize_lot(lot: ParkingLot, include_slots: bool = False) -> dict:
 
 
 def _serialize_booking(booking: Booking) -> BookingResponse:
-    qr_payload = f"PARKWISE|{booking.booking_reference}|{booking.slot_id}|{booking.vehicle_number}|{booking.qr_signature}"
     events_sorted = sorted(
         booking.events or [], key=lambda e: e.created_at or datetime.now(timezone.utc)
+    )
+    active_qr = None
+    if getattr(booking, "qr_passes", None):
+        passes_sorted = sorted(booking.qr_passes, key=lambda p: p.id, reverse=True)
+        if passes_sorted:
+            active_qr = QRPassResponse.model_validate(passes_sorted[0])
+    qr_payload = (
+        active_qr.qr_payload
+        if active_qr
+        else f"PARKWISE|{booking.booking_reference}|{booking.slot_id}|{booking.vehicle_number}|{booking.qr_signature}"
     )
     return BookingResponse(
         id=booking.id,
@@ -283,6 +321,7 @@ def _serialize_booking(booking: Booking) -> BookingResponse:
         created_at=booking.created_at,
         payment=booking.payment,
         events=[BookingEventResponse.model_validate(ev) for ev in events_sorted],
+        qr_pass=active_qr,
     )
 
 
@@ -1822,8 +1861,16 @@ async def get_driver_recommendations(
 
 
 # ----------------------------------------------------------------------------
-# 5. Server-Side Payment Verification (Razorpay HMAC)
+# 5. Phase 05: Razorpay Test-Mode Payments, Webhooks, Refunds & GST Receipts
 # ----------------------------------------------------------------------------
+@app.post("/api/v1/payments/orders", response_model=PaymentOrderResponse)
+async def create_payment_order(
+    payload: PaymentOrderCreateRequest,
+    db: Session = Depends(get_db),
+):
+    return create_or_refresh_razorpay_order(db, payload)
+
+
 @app.post("/api/v1/payments/verify", response_model=BookingResponse)
 async def verify_payment(
     payload: PaymentVerifyRequest,
@@ -1842,9 +1889,273 @@ async def verify_payment(
     return serialized
 
 
+@app.post("/api/v1/payments/webhook", response_model=RazorpayWebhookResponse)
+async def razorpay_webhook_handler(
+    payload: RazorpayWebhookRequest,
+    x_razorpay_signature: Optional[str] = Header(
+        None, alias="X-Razorpay-Signature"
+    ),
+    db: Session = Depends(get_db),
+):
+    sig = x_razorpay_signature if isinstance(x_razorpay_signature, str) else None
+    return process_idempotent_razorpay_webhook(db, payload, sig)
+
+
+@app.get("/api/v1/payments", response_model=List[PaymentSummary])
+async def list_payments(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    db: Session = Depends(get_db),
+):
+    query = db.query(Payment)
+    if status_filter:
+        query = query.filter(Payment.status == status_filter.upper())
+    payments = query.order_by(Payment.created_at.desc()).limit(50).all()
+    return [PaymentSummary.model_validate(p) for p in payments]
+
+
+@app.get(
+    "/api/v1/payments/{booking_reference}",
+    response_model=PaymentSummary,
+)
+async def get_payment_status(
+    booking_reference: str,
+    db: Session = Depends(get_db),
+):
+    booking = (
+        db.query(Booking)
+        .filter(Booking.booking_reference == booking_reference)
+        .first()
+    )
+    if not booking or not booking.payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment record not found for booking reference.",
+        )
+    return PaymentSummary.model_validate(booking.payment)
+
+
+@app.post(
+    "/api/v1/payments/{booking_reference}/refund",
+    response_model=BookingResponse,
+)
+async def refund_payment(
+    booking_reference: str,
+    payload: PaymentRefundRequest,
+    db: Session = Depends(get_db),
+):
+    booking = process_payment_refund(db, booking_reference, payload)
+    serialized = _serialize_booking(booking)
+    await ws_manager.broadcast_event(
+        "PAYMENT_REFUNDED",
+        {
+            "booking_reference": booking.booking_reference,
+            "status": booking.status.value,
+            "refund_id": booking.payment.refund_id if booking.payment else None,
+        },
+    )
+    return serialized
+
+
+@app.get(
+    "/api/v1/payments/{booking_reference}/receipt",
+    response_model=PaymentReceiptResponse,
+)
+async def get_payment_gst_receipt(
+    booking_reference: str,
+    db: Session = Depends(get_db),
+):
+    return generate_payment_receipt(db, booking_reference)
+
+
 # ----------------------------------------------------------------------------
-# 6. Gate Management Terminal (ANPR + Cryptographic QR Verification)
+# 5B. Phase 05: Signed, Time-Limited QR Pass System
 # ----------------------------------------------------------------------------
+@app.post(
+    "/api/v1/qr/{booking_reference}/issue",
+    response_model=QRPassResponse,
+)
+async def issue_or_rotate_qr_pass(
+    booking_reference: str,
+    payload: QRPassIssueRequest,
+    db: Session = Depends(get_db),
+):
+    booking = (
+        db.query(Booking)
+        .filter(Booking.booking_reference == booking_reference)
+        .first()
+    )
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking reference not found.",
+        )
+    if booking.status == BookingStatus.CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot issue QR pass for a cancelled booking.",
+        )
+    qr_pass = issue_signed_qr_pass(
+        db, booking, ttl_minutes=payload.ttl_minutes, commit=True
+    )
+    return QRPassResponse.model_validate(qr_pass)
+
+
+@app.post(
+    "/api/v1/qr/{booking_reference}/revoke",
+    response_model=QRPassResponse,
+)
+async def revoke_booking_qr_pass(
+    booking_reference: str,
+    payload: QRPassRevokeRequest,
+    db: Session = Depends(get_db),
+):
+    qr_pass = revoke_qr_pass(db, booking_reference, payload.reason)
+    return QRPassResponse.model_validate(qr_pass)
+
+
+@app.post("/api/v1/qr/verify")
+async def verify_qr_pass_endpoint(
+    payload: QRPassVerifyRequest,
+    db: Session = Depends(get_db),
+):
+    booking = (
+        db.query(Booking)
+        .filter(Booking.booking_reference == payload.booking_reference)
+        .first()
+    )
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking reference not found.",
+        )
+    qr_pass = (
+        db.query(QRPassToken)
+        .filter(QRPassToken.booking_id == booking.id)
+        .order_by(QRPassToken.id.desc())
+        .first()
+    )
+    now = datetime.now(timezone.utc)
+    sig_ok = (qr_pass and qr_pass.qr_signature == payload.qr_signature) or verify_qr_signature(
+        booking.booking_reference,
+        booking.slot_id,
+        booking.vehicle_number,
+        payload.qr_signature,
+    )
+    if not sig_ok:
+        return {
+            "valid": False,
+            "reason": "INVALID_SIGNATURE",
+            "booking_reference": booking.booking_reference,
+        }
+    if qr_pass and qr_pass.is_revoked:
+        return {
+            "valid": False,
+            "reason": "TOKEN_REVOKED",
+            "booking_reference": booking.booking_reference,
+            "token_jti": qr_pass.token_jti,
+        }
+    if qr_pass:
+        exp_utc = (
+            qr_pass.expires_at.replace(tzinfo=timezone.utc)
+            if qr_pass.expires_at.tzinfo is None
+            else qr_pass.expires_at.astimezone(timezone.utc)
+        )
+        if now > exp_utc:
+            return {
+                "valid": False,
+                "reason": "TOKEN_EXPIRED",
+                "booking_reference": booking.booking_reference,
+                "token_jti": qr_pass.token_jti,
+            }
+    return {
+        "valid": True,
+        "reason": "VERIFIED_ACTIVE",
+        "booking_reference": booking.booking_reference,
+        "booking_status": booking.status.value,
+        "token_jti": qr_pass.token_jti if qr_pass else None,
+        "expires_at": qr_pass.expires_at.isoformat() if qr_pass else None,
+    }
+
+
+# ----------------------------------------------------------------------------
+# 6. Gate Management Terminal (ANPR + Signed QR + Replay Guard + Offline Sync)
+# ----------------------------------------------------------------------------
+def _validate_booking_qr_for_gate(
+    db: Session,
+    booking: Booking,
+    qr_signature: str,
+    token_jti: Optional[str],
+    now: datetime,
+) -> Optional[QRPassToken]:
+    """Validate HMAC signature, revocation, and expiration of a booking's QR pass."""
+    qr_pass: Optional[QRPassToken] = None
+    if token_jti:
+        qr_pass = (
+            db.query(QRPassToken)
+            .filter(
+                QRPassToken.booking_id == booking.id,
+                QRPassToken.token_jti == token_jti,
+            )
+            .first()
+        )
+    if not qr_pass:
+        qr_pass = (
+            db.query(QRPassToken)
+            .filter(QRPassToken.booking_id == booking.id)
+            .order_by(QRPassToken.id.desc())
+            .first()
+        )
+
+    v1_valid = verify_qr_signature(
+        booking.booking_reference,
+        booking.slot_id,
+        booking.vehicle_number,
+        qr_signature,
+    )
+    v2_valid = False
+    if qr_pass:
+        exp_utc_for_sig = (
+            qr_pass.expires_at.replace(tzinfo=timezone.utc)
+            if qr_pass.expires_at.tzinfo is None
+            else qr_pass.expires_at.astimezone(timezone.utc)
+        )
+        expected_v2 = compute_time_limited_qr_signature(
+            booking.booking_reference,
+            booking.slot_id,
+            booking.vehicle_number,
+            qr_pass.token_jti,
+            int(exp_utc_for_sig.timestamp()),
+        )
+        v2_valid = (
+            qr_signature == qr_pass.qr_signature
+            or qr_signature == expected_v2
+        )
+
+    if not (v1_valid or v2_valid):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tampered or invalid QR cryptographic signature. Boom barrier remains locked.",
+        )
+
+    if qr_pass:
+        if qr_pass.is_revoked:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"QR pass token {qr_pass.token_jti} has been revoked ({qr_pass.revoked_reason or 'revoked'}).",
+            )
+        exp_utc = (
+            qr_pass.expires_at.replace(tzinfo=timezone.utc)
+            if qr_pass.expires_at.tzinfo is None
+            else qr_pass.expires_at.astimezone(timezone.utc)
+        )
+        if now > exp_utc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"QR pass token {qr_pass.token_jti} expired at {exp_utc.isoformat()}.",
+            )
+    return qr_pass
+
+
 @app.post("/api/v1/gate/scan", response_model=GateScanResponse)
 async def process_gate_scan(
     payload: GateScanRequest,
@@ -1863,32 +2174,45 @@ async def process_gate_scan(
             detail="Booking reference not recognized by gate control.",
         )
 
-    is_valid_sig = verify_qr_signature(
-        booking.booking_reference,
-        booking.slot_id,
-        booking.vehicle_number,
-        payload.qr_signature,
-    )
-    if not is_valid_sig:
+    try:
+        qr_pass = _validate_booking_qr_for_gate(
+            db, booking, payload.qr_signature, payload.token_jti, now
+        )
+    except HTTPException as qr_exc:
+        evt_label = "DENIED_INVALID_SIGNATURE"
+        if "revoked" in qr_exc.detail.lower():
+            evt_label = "DENIED_REVOKED_QR_PASS"
+        elif "expired" in qr_exc.detail.lower():
+            evt_label = "DENIED_EXPIRED_QR_PASS"
         denied_log = GateLog(
             lot_id=booking.lot_id,
             booking_reference=booking.booking_reference,
             vehicle_number=payload.vehicle_number,
-            event_type="DENIED_INVALID_SIGNATURE",
+            event_type=evt_label,
             gate_lane=payload.gate_lane,
             anpr_confidence=0.95,
             verification_method="QR_HMAC_REJECTED",
             barrier_action="LOCKED",
-            notes="Cryptographic HMAC signature verification failed.",
+            notes=qr_exc.detail,
         )
         db.add(denied_log)
         db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tampered or invalid QR cryptographic signature. Boom barrier remains locked.",
-        )
+        raise qr_exc
 
     if booking.vehicle_number.upper() != payload.vehicle_number.strip().upper():
+        denied_plate = GateLog(
+            lot_id=booking.lot_id,
+            booking_reference=booking.booking_reference,
+            vehicle_number=payload.vehicle_number,
+            event_type="DENIED_PLATE_MISMATCH",
+            gate_lane=payload.gate_lane,
+            anpr_confidence=0.96,
+            verification_method="ANPR_MISMATCH",
+            barrier_action="LOCKED",
+            notes=f"ANPR Plate Mismatch: Camera read {payload.vehicle_number}, expected {booking.vehicle_number}.",
+        )
+        db.add(denied_plate)
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"ANPR Plate Mismatch: Camera read {payload.vehicle_number}, expected {booking.vehicle_number}.",
@@ -1905,17 +2229,67 @@ async def process_gate_scan(
     overstay_fee = 0.0
 
     if payload.action == "ENTRY":
-        if booking.status not in (BookingStatus.CONFIRMED, BookingStatus.ACTIVE):
+        # Prevent duplicate ENTRY replay
+        if (
+            booking.checked_in_at is not None
+            or booking.status == BookingStatus.ACTIVE
+            or (qr_pass and qr_pass.entry_used_at is not None)
+        ):
+            dup_log = GateLog(
+                lot_id=booking.lot_id,
+                booking_reference=booking.booking_reference,
+                vehicle_number=booking.vehicle_number,
+                event_type="DENIED_DUPLICATE_ENTRY",
+                gate_lane=payload.gate_lane,
+                anpr_confidence=0.98,
+                verification_method="QR_REPLAY_GUARD",
+                barrier_action="LOCKED",
+                notes="Duplicate ENTRY replay blocked: pass already used for check-in.",
+            )
+            db.add(dup_log)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Duplicate ENTRY replay blocked: QR pass has already been used for check-in.",
+            )
+
+        if booking.status != BookingStatus.CONFIRMED:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Booking cannot check in from current state: {booking.status.value}",
             )
         booking.status = BookingStatus.ACTIVE
         booking.checked_in_at = now
+        if qr_pass:
+            qr_pass.entry_used_at = now
         if slot:
             slot.status = SlotStatus.OCCUPIED
         message = f"Entry authorized for {booking.vehicle_number}. Proceed to Bay {slot_num}."
     else:
+        # Prevent duplicate EXIT replay
+        if (
+            booking.checked_out_at is not None
+            or booking.status == BookingStatus.COMPLETED
+            or (qr_pass and qr_pass.exit_used_at is not None)
+        ):
+            dup_exit_log = GateLog(
+                lot_id=booking.lot_id,
+                booking_reference=booking.booking_reference,
+                vehicle_number=booking.vehicle_number,
+                event_type="DENIED_DUPLICATE_EXIT",
+                gate_lane=payload.gate_lane,
+                anpr_confidence=0.98,
+                verification_method="QR_REPLAY_GUARD",
+                barrier_action="LOCKED",
+                notes="Duplicate EXIT replay blocked: pass already used for check-out.",
+            )
+            db.add(dup_exit_log)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Duplicate EXIT replay blocked: QR pass has already been used for check-out.",
+            )
+
         if booking.status != BookingStatus.ACTIVE:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1926,9 +2300,10 @@ async def process_gate_scan(
             if booking.end_time.tzinfo is None
             else booking.end_time.astimezone(timezone.utc)
         )
-        if now > end_utc:
+        grace_mins = getattr(booking.lot, "grace_period_minutes", 15) or 15
+        if now > end_utc + timedelta(minutes=grace_mins):
             extra_hours = max(
-                1.0, round((now - end_utc).total_seconds() / 3600.0, 2)
+                0.5, round((now - end_utc).total_seconds() / 3600.0, 2)
             )
             overstay_fee = round(
                 extra_hours * (booking.lot.base_hourly_rate_inr * 1.5), 2
@@ -1937,6 +2312,8 @@ async def process_gate_scan(
 
         booking.status = BookingStatus.COMPLETED
         booking.checked_out_at = now
+        if qr_pass:
+            qr_pass.exit_used_at = now
         if slot:
             slot.status = SlotStatus.AVAILABLE
         message = (
@@ -1954,6 +2331,7 @@ async def process_gate_scan(
         anpr_confidence=0.988,
         verification_method="QR_HMAC + ANPR_OPTICAL",
         barrier_action="OPENED",
+        overstay_fee_inr=overstay_fee,
         notes=message,
     )
     db.add(log_entry)
@@ -1978,8 +2356,308 @@ async def process_gate_scan(
         slot_number=slot_num,
         anpr_confidence=0.988,
         overstay_fee_inr=overstay_fee,
+        checked_in_at=booking.checked_in_at,
+        checked_out_at=booking.checked_out_at,
+        token_jti=qr_pass.token_jti if qr_pass else None,
         message=message,
         timestamp=now,
+    )
+
+
+@app.post("/api/v1/gate/override", response_model=GateManualOverrideResponse)
+async def manual_gate_staff_override(
+    payload: GateManualOverrideRequest,
+    current_user: User = Depends(require_permission("gate:override")),
+    db: Session = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+    log_entry = GateLog(
+        lot_id=payload.lot_id,
+        booking_reference=payload.booking_reference,
+        vehicle_number=payload.vehicle_number.strip().upper(),
+        event_type="MANUAL_OVERRIDE",
+        gate_lane=payload.gate_lane,
+        anpr_confidence=1.0,
+        verification_method=f"STAFF_OVERRIDE ({current_user.role.value})",
+        barrier_action=payload.barrier_action,
+        staff_override_by=current_user.email,
+        staff_override_reason=payload.reason.strip(),
+        notes=f"Supervisor override ({payload.barrier_action}) by {current_user.email}: {payload.reason.strip()}",
+        timestamp=now,
+    )
+    db.add(log_entry)
+    db.add(
+        AuditLog(
+            actor_email=current_user.email,
+            actor_role=current_user.role.value,
+            action="GATE_MANUAL_OVERRIDE",
+            target_resource=f"Lot #{payload.lot_id} / {payload.vehicle_number.strip().upper()}",
+            details=f"Barrier {payload.barrier_action}: {payload.reason.strip()}",
+        )
+    )
+    db.commit()
+    db.refresh(log_entry)
+    return GateManualOverrideResponse(
+        log_id=log_entry.id,
+        lot_id=log_entry.lot_id,
+        booking_reference=log_entry.booking_reference,
+        vehicle_number=log_entry.vehicle_number,
+        barrier_action=log_entry.barrier_action,
+        authorized_by_email=current_user.email,
+        authorized_by_role=current_user.role.value,
+        reason=payload.reason.strip(),
+        timestamp=now,
+    )
+
+
+@app.get("/api/v1/gate/offline-manifest/{lot_id}")
+async def get_offline_gate_manifest(lot_id: int, db: Session = Depends(get_db)):
+    """Provide signed booking manifest for edge gate terminals operating in temporary offline mode."""
+    bookings = (
+        db.query(Booking)
+        .filter(
+            Booking.lot_id == lot_id,
+            Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.ACTIVE]),
+        )
+        .all()
+    )
+    manifest_items = []
+    for b in bookings:
+        qr_pass = (
+            db.query(QRPassToken)
+            .filter(QRPassToken.booking_id == b.id, QRPassToken.is_revoked.is_(False))
+            .order_by(QRPassToken.id.desc())
+            .first()
+        )
+        manifest_items.append(
+            {
+                "booking_reference": b.booking_reference,
+                "slot_id": b.slot_id,
+                "vehicle_number": b.vehicle_number,
+                "status": b.status.value,
+                "qr_signature": b.qr_signature,
+                "token_jti": qr_pass.token_jti if qr_pass else None,
+                "expires_at": qr_pass.expires_at.isoformat() if qr_pass else None,
+                "entry_used_at": qr_pass.entry_used_at.isoformat()
+                if qr_pass and qr_pass.entry_used_at
+                else None,
+                "exit_used_at": qr_pass.exit_used_at.isoformat()
+                if qr_pass and qr_pass.exit_used_at
+                else None,
+            }
+        )
+    return {
+        "lot_id": lot_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "active_pass_count": len(manifest_items),
+        "manifest": manifest_items,
+    }
+
+
+@app.post("/api/v1/gate/offline-sync", response_model=OfflineGateSyncResponse)
+async def synchronize_offline_gate_events(
+    payload: OfflineGateSyncRequest,
+    db: Session = Depends(get_db),
+):
+    """Synchronize queued offline gate events with cryptographic verification and conflict resolution."""
+    now = datetime.now(timezone.utc)
+    results: List[OfflineGateSyncResultItem] = []
+    synced_count = 0
+    conflict_count = 0
+    rejected_count = 0
+
+    for item in payload.events:
+        # 1. Idempotency check on client_event_id
+        existing_log = (
+            db.query(GateLog)
+            .filter(GateLog.client_event_id == item.client_event_id)
+            .first()
+        )
+        if existing_log:
+            synced_count += 1
+            results.append(
+                OfflineGateSyncResultItem(
+                    client_event_id=item.client_event_id,
+                    booking_reference=item.booking_reference,
+                    action=item.action,
+                    sync_outcome="IDEMPOTENT_ALREADY_SYNCED",
+                    overstay_fee_inr=existing_log.overstay_fee_inr or 0.0,
+                    details="Offline event was already synchronized previously.",
+                )
+            )
+            continue
+
+        booking = (
+            db.query(Booking)
+            .filter(Booking.booking_reference == item.booking_reference)
+            .first()
+        )
+        if not booking:
+            rejected_count += 1
+            results.append(
+                OfflineGateSyncResultItem(
+                    client_event_id=item.client_event_id,
+                    booking_reference=item.booking_reference,
+                    action=item.action,
+                    sync_outcome="REJECTED_BOOKING_NOT_FOUND",
+                    details="Booking reference does not exist.",
+                )
+            )
+            continue
+
+        recorded_utc = (
+            item.recorded_at.replace(tzinfo=timezone.utc)
+            if item.recorded_at.tzinfo is None
+            else item.recorded_at.astimezone(timezone.utc)
+        )
+
+        # 2. Verify cryptographic signature & token expiration at recorded_at
+        try:
+            qr_pass = _validate_booking_qr_for_gate(
+                db, booking, item.qr_signature, item.token_jti, recorded_utc
+            )
+        except HTTPException as exc:
+            rejected_count += 1
+            outcome = (
+                "REJECTED_EXPIRED_OR_REVOKED"
+                if ("expired" in exc.detail.lower() or "revoked" in exc.detail.lower())
+                else "REJECTED_INVALID_SIGNATURE"
+            )
+            results.append(
+                OfflineGateSyncResultItem(
+                    client_event_id=item.client_event_id,
+                    booking_reference=item.booking_reference,
+                    action=item.action,
+                    sync_outcome=outcome,
+                    details=exc.detail,
+                )
+            )
+            continue
+
+        # 3. Never allow offline decisions to bypass unpaid or cancelled bookings
+        if booking.status in (BookingStatus.PENDING_PAYMENT, BookingStatus.CANCELLED):
+            rejected_count += 1
+            results.append(
+                OfflineGateSyncResultItem(
+                    client_event_id=item.client_event_id,
+                    booking_reference=item.booking_reference,
+                    action=item.action,
+                    sync_outcome="REJECTED_UNPAID_OR_CANCELLED",
+                    details=f"Offline bypass blocked: booking is {booking.status.value}.",
+                )
+            )
+            continue
+
+        slot = db.query(ParkingSlot).filter(ParkingSlot.id == booking.slot_id).first()
+        overstay_fee = 0.0
+
+        # 4. Conflict detection for duplicate ENTRY or EXIT
+        if item.action == "ENTRY":
+            if (
+                booking.checked_in_at is not None
+                or booking.status in (BookingStatus.ACTIVE, BookingStatus.COMPLETED)
+                or (qr_pass and qr_pass.entry_used_at is not None)
+            ):
+                conflict_count += 1
+                results.append(
+                    OfflineGateSyncResultItem(
+                        client_event_id=item.client_event_id,
+                        booking_reference=item.booking_reference,
+                        action="ENTRY",
+                        sync_outcome="CONFLICT_DUPLICATE_REPLAY",
+                        details="Conflict detected: booking was already checked in online or by another lane.",
+                    )
+                )
+                continue
+
+            booking.status = BookingStatus.ACTIVE
+            booking.checked_in_at = recorded_utc
+            if qr_pass:
+                qr_pass.entry_used_at = recorded_utc
+            if slot:
+                slot.status = SlotStatus.OCCUPIED
+            details_msg = f"Synchronized offline ENTRY at {recorded_utc.isoformat()}."
+        else:
+            if (
+                booking.checked_out_at is not None
+                or booking.status == BookingStatus.COMPLETED
+                or (qr_pass and qr_pass.exit_used_at is not None)
+            ):
+                conflict_count += 1
+                results.append(
+                    OfflineGateSyncResultItem(
+                        client_event_id=item.client_event_id,
+                        booking_reference=item.booking_reference,
+                        action="EXIT",
+                        sync_outcome="CONFLICT_DUPLICATE_REPLAY",
+                        details="Conflict detected: booking was already checked out.",
+                    )
+                )
+                continue
+
+            end_utc = (
+                booking.end_time.replace(tzinfo=timezone.utc)
+                if booking.end_time.tzinfo is None
+                else booking.end_time.astimezone(timezone.utc)
+            )
+            grace_mins = getattr(booking.lot, "grace_period_minutes", 15) or 15
+            if recorded_utc > end_utc + timedelta(minutes=grace_mins):
+                extra_hours = max(
+                    0.5, round((recorded_utc - end_utc).total_seconds() / 3600.0, 2)
+                )
+                overstay_fee = round(
+                    extra_hours * (booking.lot.base_hourly_rate_inr * 1.5), 2
+                )
+                booking.overstay_fee_inr = overstay_fee
+
+            booking.status = BookingStatus.COMPLETED
+            booking.checked_out_at = recorded_utc
+            if qr_pass:
+                qr_pass.exit_used_at = recorded_utc
+            if slot:
+                slot.status = SlotStatus.AVAILABLE
+            details_msg = (
+                f"Synchronized offline EXIT at {recorded_utc.isoformat()} "
+                f"(overstay ₹{overstay_fee})."
+            )
+
+        sync_log = GateLog(
+            lot_id=booking.lot_id,
+            booking_reference=booking.booking_reference,
+            vehicle_number=booking.vehicle_number,
+            event_type=item.action,
+            gate_lane=item.gate_lane,
+            anpr_confidence=0.985,
+            verification_method="OFFLINE_SIGNED_QR_SYNC",
+            barrier_action="OPENED",
+            overstay_fee_inr=overstay_fee,
+            client_event_id=item.client_event_id,
+            sync_status="OFFLINE_SYNCED",
+            notes=details_msg,
+            timestamp=recorded_utc,
+        )
+        db.add(sync_log)
+        synced_count += 1
+        results.append(
+            OfflineGateSyncResultItem(
+                client_event_id=item.client_event_id,
+                booking_reference=item.booking_reference,
+                action=item.action,
+                sync_outcome="SYNCED_APPLIED",
+                overstay_fee_inr=overstay_fee,
+                details=details_msg,
+            )
+        )
+
+    db.commit()
+    return OfflineGateSyncResponse(
+        terminal_id=payload.terminal_id,
+        total_submitted=len(payload.events),
+        synced_count=synced_count,
+        conflict_count=conflict_count,
+        rejected_count=rejected_count,
+        results=results,
+        synced_at=now,
     )
 
 
@@ -2003,6 +2681,10 @@ async def list_gate_logs(
             "anpr_confidence": l.anpr_confidence,
             "verification_method": l.verification_method,
             "barrier_action": l.barrier_action,
+            "overstay_fee_inr": getattr(l, "overstay_fee_inr", 0.0) or 0.0,
+            "staff_override_by": getattr(l, "staff_override_by", None),
+            "staff_override_reason": getattr(l, "staff_override_reason", None),
+            "sync_status": getattr(l, "sync_status", "LIVE_ONLINE") or "LIVE_ONLINE",
             "notes": l.notes,
             "timestamp": l.timestamp.isoformat() if l.timestamp else None,
         }

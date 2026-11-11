@@ -27,7 +27,7 @@ from app.models import (
     Vehicle,
     VehicleCategory,
 )
-from app.services.booking_service import compute_qr_signature
+from app.services.booking_service import compute_qr_signature, issue_signed_qr_pass
 
 
 def seed_initial_data(db: Session) -> None:
@@ -499,11 +499,14 @@ def seed_initial_data(db: Session) -> None:
             amount_inr=236.0,
             currency="INR",
             payment_method="UPI / FASTag Auto-Debit",
+            upi_vpa="aarav.sharma@okicici",
+            receipt_number="PW-GST-2026-9012",
             status=PaymentStatus.CAPTURED,
             is_simulated=True,
             verified_at=now - timedelta(minutes=14),
         )
         db.add(demo_payment)
+        issue_signed_qr_pass(db, demo_booking, ttl_minutes=240, commit=False)
 
         gate_log = GateLog(
             lot_id=first_lot.id,

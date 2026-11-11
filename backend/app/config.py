@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # Database: PostgreSQL in production, SQLite fallback for local development
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./parkwise_v4.db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./parkwise_v5.db")
 
     # Redis for distributed slot locking and pub/sub
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -26,10 +26,14 @@ class Settings(BaseSettings):
         "QR_HMAC_SECRET", "parkwise-dev-only-qr-hmac-secret-key-change-in-prod-192837"
     )
 
-    # Razorpay Payment Gateway
-    RAZORPAY_KEY_ID: str = os.getenv("RAZORPAY_KEY_ID", "")
-    RAZORPAY_KEY_SECRET: str = os.getenv("RAZORPAY_KEY_SECRET", "")
-    RAZORPAY_WEBHOOK_SECRET: str = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
+    # Razorpay Payment Gateway (Test Mode defaults if env vars not provided)
+    RAZORPAY_KEY_ID: str = os.getenv("RAZORPAY_KEY_ID", "rzp_test_parkwise_in_2026")
+    RAZORPAY_KEY_SECRET: str = os.getenv(
+        "RAZORPAY_KEY_SECRET", "parkwise-razorpay-sim-secret"
+    )
+    RAZORPAY_WEBHOOK_SECRET: str = os.getenv(
+        "RAZORPAY_WEBHOOK_SECRET", "parkwise-razorpay-webhook-secret"
+    )
     PAYMENT_SIMULATION_MODE: bool = (
         os.getenv("PAYMENT_SIMULATION_MODE", "true").lower() == "true"
     )

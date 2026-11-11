@@ -27,6 +27,7 @@ from app.models import (
     Payment,
     PaymentStatus,
     PricingRule,
+    QRPassToken,
     SlotStatus,
     SlotType,
     User,
@@ -121,6 +122,131 @@ def verify_qr_signature(
 ) -> bool:
     expected = compute_qr_signature(booking_reference, slot_id, vehicle_number)
     return hmac.compare_digest(expected, signature)
+
+
+def compute_time_limited_qr_signature(
+    booking_reference: str,
+    slot_id: int,
+    vehicle_number: str,
+    token_jti: str,
+    expires_epoch: int,
+) -> str:
+    """Generate time-limited HMAC-SHA256 QR pass signature bound to booking, slot, plate, JTI, and expiration."""
+    message = (
+        f"{booking_reference}:{slot_id}:{vehicle_number.upper()}:"
+        f"{token_jti}:{expires_epoch}"
+    ).encode("utf-8")
+    secret = settings.QR_HMAC_SECRET.encode("utf-8")
+    return hmac.new(secret, message, hashlib.sha256).hexdigest()
+
+
+def issue_signed_qr_pass(
+    db: Session,
+    booking: Booking,
+    ttl_minutes: Optional[int] = None,
+    commit: bool = True,
+) -> QRPassToken:
+    """Issue a signed, time-limited QR pass token for a booking (revoking any previous unconsumed pass)."""
+    now = datetime.now(timezone.utc)
+    if ttl_minutes is not None:
+        expires_at = now + timedelta(minutes=ttl_minutes)
+    else:
+        end_utc = _to_utc(booking.end_time)
+        default_exp = end_utc + timedelta(minutes=60)
+        expires_at = (
+            default_exp
+            if default_exp > now + timedelta(minutes=15)
+            else now + timedelta(hours=3)
+        )
+
+    expires_epoch = int(expires_at.timestamp())
+    token_jti = f"qr_{uuid.uuid4().hex[:16]}"
+    sig = compute_time_limited_qr_signature(
+        booking.booking_reference,
+        booking.slot_id,
+        booking.vehicle_number,
+        token_jti,
+        expires_epoch,
+    )
+    payload_str = (
+        f"PARKWISE_V2|{booking.booking_reference}|{booking.slot_id}|"
+        f"{booking.vehicle_number}|{token_jti}|{expires_epoch}|{sig}"
+    )
+
+    # Revoke any earlier active passes that have not completed EXIT
+    existing_passes = (
+        db.query(QRPassToken)
+        .filter(
+            QRPassToken.booking_id == booking.id,
+            QRPassToken.is_revoked.is_(False),
+        )
+        .all()
+    )
+    for ep in existing_passes:
+        ep.is_revoked = True
+        ep.revoked_reason = "Superseded by rotated QR pass token"
+        ep.revoked_at = now
+
+    qr_pass = QRPassToken(
+        booking_id=booking.id,
+        booking_reference=booking.booking_reference,
+        token_jti=token_jti,
+        qr_signature=sig,
+        qr_payload=payload_str,
+        issued_at=now,
+        expires_at=expires_at,
+        is_revoked=False,
+    )
+    db.add(qr_pass)
+    booking.qr_signature = sig
+    db.add(
+        BookingEvent(
+            booking_id=booking.id,
+            booking_reference=booking.booking_reference,
+            event_type="QR_PASS_ISSUED",
+            previous_status=booking.status.value,
+            new_status=booking.status.value,
+            details=f"Issued time-limited QR pass {token_jti} valid until {expires_at.isoformat()}.",
+        )
+    )
+    if commit:
+        db.commit()
+        db.refresh(qr_pass)
+    return qr_pass
+
+
+def revoke_qr_pass(
+    db: Session, booking_reference: str, reason: str
+) -> QRPassToken:
+    """Revoke the active QR pass token for a booking."""
+    qr_pass = (
+        db.query(QRPassToken)
+        .filter(QRPassToken.booking_reference == booking_reference)
+        .order_by(QRPassToken.id.desc())
+        .first()
+    )
+    if not qr_pass:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No QR pass token found for this booking reference.",
+        )
+    now = datetime.now(timezone.utc)
+    qr_pass.is_revoked = True
+    qr_pass.revoked_reason = reason
+    qr_pass.revoked_at = now
+    db.add(
+        BookingEvent(
+            booking_id=qr_pass.booking_id,
+            booking_reference=booking_reference,
+            event_type="QR_PASS_REVOKED",
+            previous_status=None,
+            new_status="REVOKED",
+            details=f"Revoked QR pass {qr_pass.token_jti}: {reason}",
+        )
+    )
+    db.commit()
+    db.refresh(qr_pass)
+    return qr_pass
 
 
 def release_expired_reservations(db: Session) -> List[str]:
@@ -624,6 +750,9 @@ def create_transactional_booking(
                 ),
             )
         )
+
+        # Issue initial time-limited signed QR pass token for the booking
+        issue_signed_qr_pass(db, booking, ttl_minutes=None, commit=False)
 
         db.commit()
         db.refresh(booking)

@@ -1,4 +1,4 @@
-"""Comprehensive Integration Test Suite for Parkwise Enterprise Backend (Phases 01, 02, 03 & 04)."""
+"""Comprehensive Integration Test Suite for Parkwise Enterprise Backend (Phases 01, 02, 03, 04 & 05)."""
 from datetime import datetime, timedelta, timezone
 from typing import Any, Coroutine
 import pytest
@@ -23,6 +23,7 @@ from app.main import (
     create_parking_floor,
     create_parking_location,
     create_parking_zone,
+    create_payment_order,
     deactivate_my_account,
     delete_user_vehicle,
     extend_booking,
@@ -31,25 +32,35 @@ from app.main import (
     get_ai_forecast,
     get_driver_recommendations,
     get_me,
+    get_offline_gate_manifest,
     get_parking_lot_detail,
+    get_payment_gst_receipt,
+    get_payment_status,
     get_roles_and_permissions,
     health_check,
+    issue_or_rotate_qr_pass,
     list_booking_events,
     list_location_pricing_rules,
     list_parking_lots,
     list_parking_operators,
+    list_payments,
     list_security_audit_logs,
     list_user_sessions,
     list_user_vehicles,
     list_vehicle_categories,
     login,
     logout,
+    manual_gate_staff_override,
     process_gate_scan,
+    razorpay_webhook_handler,
+    refund_payment,
     register_user,
     reset_password,
+    revoke_booking_qr_pass,
     revoke_user_session,
     search_available_parking,
     set_primary_user_vehicle,
+    synchronize_offline_gate_events,
     trigger_release_expired_reservations,
     update_location_opening_hours,
     update_lot_surge,
@@ -57,8 +68,9 @@ from app.main import (
     update_slot_status,
     verify_email,
     verify_payment,
+    verify_qr_pass_endpoint,
 )
-from app.models import Booking, SlotStatus, SlotType, User, UserRole
+from app.models import Booking, QRPassToken, SlotStatus, SlotType, User, UserRole
 from app.schemas import (
     AdditionalChargesRequest,
     AdminRoleUpdateRequest,
@@ -70,16 +82,25 @@ from app.schemas import (
     DurationAndQuoteRequest,
     EmailVerificationRequest,
     ForgotPasswordRequest,
+    GateManualOverrideRequest,
     GateScanRequest,
     LocationOpeningHoursUpdateRequest,
     LoginRequest,
+    OfflineGateEventItem,
+    OfflineGateSyncRequest,
     ParkingBayCreateRequest,
     ParkingFloorCreateRequest,
     ParkingLocationCreateRequest,
     ParkingZoneCreateRequest,
+    PaymentOrderCreateRequest,
+    PaymentRefundRequest,
     PaymentVerifyRequest,
     PricingRuleCreateRequest,
     ProfileUpdateRequest,
+    QRPassIssueRequest,
+    QRPassRevokeRequest,
+    QRPassVerifyRequest,
+    RazorpayWebhookRequest,
     RegisterRequest,
     ResetPasswordRequest,
     SlotStatusUpdateRequest,
@@ -88,6 +109,10 @@ from app.schemas import (
     VehicleCreateRequest,
 )
 from app.seed import seed_initial_data
+from app.services.payment_service import (
+    compute_razorpay_signature,
+    compute_webhook_signature,
+)
 
 
 def _run_sync(coro: Coroutine[Any, Any, Any]) -> Any:
@@ -976,5 +1001,476 @@ def test_phase04_inventory_and_booking_engine():
             )
         )
         assert rebooked_b2.status.value == "PENDING_PAYMENT"
+    finally:
+        db.close()
+
+
+def test_phase05_payments_qr_and_gate_management():
+    auth_rate_limiter.reset()
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        seed_initial_data(db)
+        lots = _run_sync(list_parking_lots(city=None, db=db))
+        lot_id = lots[0]["id"]
+        lot_detail = _run_sync(get_parking_lot_detail(lot_id=lot_id, db=db))
+        free_slots = [
+            s for s in lot_detail["slots"] if s["status"].value == "AVAILABLE"
+        ]
+        slot_a_id = free_slots[0]["id"]
+        slot_b_id = free_slots[1]["id"]
+        slot_c_id = free_slots[2]["id"]
+        slot_d_id = free_slots[3]["id"]
+
+        now = datetime.now(timezone.utc)
+        w_start = now + timedelta(hours=1)
+        w_end = now + timedelta(hours=3)
+
+        # 1. Create Booking & Razorpay Test-Mode Payment Order Creation (with UPI Intent URI)
+        b_pay = _run_sync(
+            create_booking(
+                payload=BookingCreateRequest(
+                    lot_id=lot_id,
+                    slot_id=slot_a_id,
+                    vehicle_number="DL-01-EV-1001",
+                    vehicle_category="EV_FOUR_WHEELER",
+                    driver_name="Aditya Kapoor",
+                    driver_phone="+919810011223",
+                    start_time=w_start,
+                    end_time=w_end,
+                ),
+                db=db,
+            )
+        )
+        order_res = _run_sync(
+            create_payment_order(
+                payload=PaymentOrderCreateRequest(
+                    booking_reference=b_pay.booking_reference,
+                    payment_method="UPI / Razorpay Checkout",
+                    upi_vpa="aditya.kapoor@okaxis",
+                ),
+                db=db,
+            )
+        )
+        assert order_res.upi_intent_uri.startswith("upi://pay?pa=parkwise.rzp@icici")
+        assert order_res.amount_paise == int(round(b_pay.total_amount_inr * 100))
+
+        # 2. Reject Tampered Payment Signature (Never trust unverified frontend payment status)
+        with pytest.raises(HTTPException) as bad_sig_exc:
+            _run_sync(
+                verify_payment(
+                    payload=PaymentVerifyRequest(
+                        booking_reference=b_pay.booking_reference,
+                        razorpay_order_id=order_res.razorpay_order_id,
+                        razorpay_payment_id="pay_test_tampered_001",
+                        razorpay_signature="forged_signature_0000000000",
+                        payment_method="UPI / Razorpay Checkout",
+                    ),
+                    db=db,
+                )
+            )
+        assert bad_sig_exc.value.status_code == 400
+        assert "signature" in bad_sig_exc.value.detail.lower()
+
+        # Verify with valid HMAC-SHA256 signature
+        valid_pay_id = "pay_test_authentic_001"
+        valid_sig = compute_razorpay_signature(
+            order_res.razorpay_order_id, valid_pay_id
+        )
+        verified_booking = _run_sync(
+            verify_payment(
+                payload=PaymentVerifyRequest(
+                    booking_reference=b_pay.booking_reference,
+                    razorpay_order_id=order_res.razorpay_order_id,
+                    razorpay_payment_id=valid_pay_id,
+                    razorpay_signature=valid_sig,
+                    payment_method="UPI / Razorpay Checkout",
+                    upi_vpa="aditya.kapoor@okaxis",
+                ),
+                db=db,
+            )
+        )
+        assert verified_booking.status.value == "CONFIRMED"
+        assert verified_booking.payment.receipt_number is not None
+
+        # 3. Payment Status, Payment History & GST Receipt Verification
+        pay_status = _run_sync(
+            get_payment_status(
+                booking_reference=b_pay.booking_reference, db=db
+            )
+        )
+        assert pay_status.status.value == "CAPTURED"
+
+        all_payments = _run_sync(list_payments(status_filter=None, db=db))
+        assert len(all_payments) >= 2
+
+        receipt = _run_sync(
+            get_payment_gst_receipt(
+                booking_reference=b_pay.booking_reference, db=db
+            )
+        )
+        assert receipt.sac_code == "996749"
+        assert round(receipt.cgst_9_pct_inr + receipt.sgst_9_pct_inr, 2) == round(
+            receipt.gst_total_inr, 2
+        )
+        assert len(receipt.cryptographic_receipt_hash) == 24
+
+        # 4. Signed, Time-Limited QR Pass System & QR Replay Prevention (Duplicate ENTRY & EXIT Blocked)
+        qr_pass = _run_sync(
+            issue_or_rotate_qr_pass(
+                booking_reference=b_pay.booking_reference,
+                payload=QRPassIssueRequest(ttl_minutes=120),
+                db=db,
+            )
+        )
+        assert qr_pass.qr_payload.startswith("PARKWISE_V2|")
+
+        verify_qr_res = _run_sync(
+            verify_qr_pass_endpoint(
+                payload=QRPassVerifyRequest(
+                    booking_reference=b_pay.booking_reference,
+                    qr_signature=qr_pass.qr_signature,
+                    token_jti=qr_pass.token_jti,
+                ),
+                db=db,
+            )
+        )
+        assert verify_qr_res["valid"] is True
+
+        # First ENTRY succeeds
+        entry_1 = _run_sync(
+            process_gate_scan(
+                payload=GateScanRequest(
+                    lot_id=lot_id,
+                    booking_reference=b_pay.booking_reference,
+                    qr_signature=qr_pass.qr_signature,
+                    token_jti=qr_pass.token_jti,
+                    vehicle_number="DL-01-EV-1001",
+                    action="ENTRY",
+                ),
+                db=db,
+            )
+        )
+        assert entry_1.allowed is True
+        assert entry_1.checked_in_at is not None
+
+        # Second ENTRY with the same QR pass is blocked (QR Replay Prevention!)
+        with pytest.raises(HTTPException) as dup_entry_exc:
+            _run_sync(
+                process_gate_scan(
+                    payload=GateScanRequest(
+                        lot_id=lot_id,
+                        booking_reference=b_pay.booking_reference,
+                        qr_signature=qr_pass.qr_signature,
+                        token_jti=qr_pass.token_jti,
+                        vehicle_number="DL-01-EV-1001",
+                        action="ENTRY",
+                    ),
+                    db=db,
+                )
+            )
+        assert dup_entry_exc.value.status_code == 409
+        assert "duplicate entry replay blocked" in dup_entry_exc.value.detail.lower()
+
+        # First EXIT succeeds
+        exit_1 = _run_sync(
+            process_gate_scan(
+                payload=GateScanRequest(
+                    lot_id=lot_id,
+                    booking_reference=b_pay.booking_reference,
+                    qr_signature=qr_pass.qr_signature,
+                    token_jti=qr_pass.token_jti,
+                    vehicle_number="DL-01-EV-1001",
+                    action="EXIT",
+                ),
+                db=db,
+            )
+        )
+        assert exit_1.allowed is True
+        assert exit_1.checked_out_at is not None
+
+        # Second EXIT with the same QR pass is blocked (QR Replay Prevention!)
+        with pytest.raises(HTTPException) as dup_exit_exc:
+            _run_sync(
+                process_gate_scan(
+                    payload=GateScanRequest(
+                        lot_id=lot_id,
+                        booking_reference=b_pay.booking_reference,
+                        qr_signature=qr_pass.qr_signature,
+                        token_jti=qr_pass.token_jti,
+                        vehicle_number="DL-01-EV-1001",
+                        action="EXIT",
+                    ),
+                    db=db,
+                )
+            )
+        assert dup_exit_exc.value.status_code == 409
+        assert "duplicate exit replay blocked" in dup_exit_exc.value.detail.lower()
+
+        # 5. Webhook Signature Verification, Idempotent Webhook Processing & Refund Workflow
+        b_wh = _run_sync(
+            create_booking(
+                payload=BookingCreateRequest(
+                    lot_id=lot_id,
+                    slot_id=slot_b_id,
+                    vehicle_number="MH-02-WH-2002",
+                    vehicle_category="SEDAN",
+                    driver_name="Meera Krishnan",
+                    driver_phone="+919820022334",
+                    start_time=w_start,
+                    end_time=w_end,
+                ),
+                db=db,
+            )
+        )
+        wh_order_id = b_wh.payment.razorpay_order_id
+        wh_pay_id = "pay_webhook_990011"
+        wh_event_id = "evt_rzp_2026_idempotent_01"
+
+        # Untrusted webhook signature rejected
+        with pytest.raises(HTTPException) as bad_wh_exc:
+            _run_sync(
+                razorpay_webhook_handler(
+                    payload=RazorpayWebhookRequest(
+                        webhook_event_id=wh_event_id,
+                        event_type="payment.captured",
+                        razorpay_order_id=wh_order_id,
+                        razorpay_payment_id=wh_pay_id,
+                    ),
+                    x_razorpay_signature="forged_webhook_signature",
+                    db=db,
+                )
+            )
+        assert bad_wh_exc.value.status_code == 400
+
+        # Valid webhook signature processed
+        valid_wh_sig = compute_webhook_signature(
+            wh_event_id, "payment.captured", wh_order_id, wh_pay_id
+        )
+        wh_res_1 = _run_sync(
+            razorpay_webhook_handler(
+                payload=RazorpayWebhookRequest(
+                    webhook_event_id=wh_event_id,
+                    event_type="payment.captured",
+                    razorpay_order_id=wh_order_id,
+                    razorpay_payment_id=wh_pay_id,
+                ),
+                x_razorpay_signature=valid_wh_sig,
+                db=db,
+            )
+        )
+        assert wh_res_1.idempotent_replay is False
+        assert wh_res_1.booking_status == "CONFIRMED"
+
+        # Replaying the exact same webhook_event_id is idempotent
+        wh_res_replay = _run_sync(
+            razorpay_webhook_handler(
+                payload=RazorpayWebhookRequest(
+                    webhook_event_id=wh_event_id,
+                    event_type="payment.captured",
+                    razorpay_order_id=wh_order_id,
+                    razorpay_payment_id=wh_pay_id,
+                ),
+                x_razorpay_signature=valid_wh_sig,
+                db=db,
+            )
+        )
+        assert wh_res_replay.idempotent_replay is True
+
+        # Refund workflow on b_wh
+        refunded_b_wh = _run_sync(
+            refund_payment(
+                booking_reference=b_wh.booking_reference,
+                payload=PaymentRefundRequest(
+                    reason="Driver trip cancelled prior to arrival"
+                ),
+                db=db,
+            )
+        )
+        assert refunded_b_wh.payment.status.value == "REFUNDED"
+        assert refunded_b_wh.payment.refund_id is not None
+        assert refunded_b_wh.status.value == "CANCELLED"
+
+        # 6. Expired & Revoked QR Passes Rejected at Gate
+        b_exp = _run_sync(
+            create_booking(
+                payload=BookingCreateRequest(
+                    lot_id=lot_id,
+                    slot_id=slot_c_id,
+                    vehicle_number="KA-01-EX-3003",
+                    vehicle_category="SEDAN",
+                    driver_name="Raghavendra Rao",
+                    driver_phone="+919845033445",
+                    start_time=w_start,
+                    end_time=w_end,
+                ),
+                db=db,
+            )
+        )
+        _run_sync(
+            verify_payment(
+                payload=PaymentVerifyRequest(
+                    booking_reference=b_exp.booking_reference,
+                    razorpay_order_id=b_exp.payment.razorpay_order_id,
+                    razorpay_payment_id="pay_exp_test_3003",
+                ),
+                db=db,
+            )
+        )
+        # Expire the QR pass in DB
+        db_qr = (
+            db.query(QRPassToken)
+            .filter(QRPassToken.booking_reference == b_exp.booking_reference)
+            .order_by(QRPassToken.id.desc())
+            .first()
+        )
+        db_qr.expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        db.commit()
+
+        with pytest.raises(HTTPException) as exp_qr_exc:
+            _run_sync(
+                process_gate_scan(
+                    payload=GateScanRequest(
+                        lot_id=lot_id,
+                        booking_reference=b_exp.booking_reference,
+                        qr_signature=b_exp.qr_signature,
+                        vehicle_number="KA-01-EX-3003",
+                        action="ENTRY",
+                    ),
+                    db=db,
+                )
+            )
+        assert exp_qr_exc.value.status_code == 403
+        assert "expired" in exp_qr_exc.value.detail.lower()
+
+        # Re-issue a fresh pass, then revoke it and verify rejection
+        fresh_qr = _run_sync(
+            issue_or_rotate_qr_pass(
+                booking_reference=b_exp.booking_reference,
+                payload=QRPassIssueRequest(ttl_minutes=60),
+                db=db,
+            )
+        )
+        _run_sync(
+            revoke_booking_qr_pass(
+                booking_reference=b_exp.booking_reference,
+                payload=QRPassRevokeRequest(reason="Reported lost device"),
+                db=db,
+            )
+        )
+        with pytest.raises(HTTPException) as rev_qr_exc:
+            _run_sync(
+                process_gate_scan(
+                    payload=GateScanRequest(
+                        lot_id=lot_id,
+                        booking_reference=b_exp.booking_reference,
+                        qr_signature=fresh_qr.qr_signature,
+                        token_jti=fresh_qr.token_jti,
+                        vehicle_number="KA-01-EX-3003",
+                        action="ENTRY",
+                    ),
+                    db=db,
+                )
+            )
+        assert rev_qr_exc.value.status_code == 403
+        assert "revoked" in rev_qr_exc.value.detail.lower()
+
+        # 7. Manual Gate Staff Override & Offline Queue Synchronization with Conflict Resolution
+        gate_staff = (
+            db.query(User).filter(User.role == UserRole.GATE_STAFF).first()
+        )
+        override_res = _run_sync(
+            manual_gate_staff_override(
+                payload=GateManualOverrideRequest(
+                    lot_id=lot_id,
+                    booking_reference=b_exp.booking_reference,
+                    vehicle_number="KA-01-EX-3003",
+                    barrier_action="OPENED",
+                    reason="Emergency ambulance / supervisor physical verification",
+                ),
+                current_user=gate_staff,
+                db=db,
+            )
+        )
+        assert override_res.barrier_action == "OPENED"
+
+        # Create a confirmed booking for Offline Gate Synchronization
+        b_off = _run_sync(
+            create_booking(
+                payload=BookingCreateRequest(
+                    lot_id=lot_id,
+                    slot_id=slot_d_id,
+                    vehicle_number="TS-09-OF-4004",
+                    vehicle_category="SUV_XL",
+                    driver_name="Harsha Vardhan",
+                    driver_phone="+919848044556",
+                    start_time=w_start,
+                    end_time=w_end,
+                ),
+                db=db,
+            )
+        )
+        b_off_paid = _run_sync(
+            verify_payment(
+                payload=PaymentVerifyRequest(
+                    booking_reference=b_off.booking_reference,
+                    razorpay_order_id=b_off.payment.razorpay_order_id,
+                    razorpay_payment_id="pay_off_4004",
+                ),
+                db=db,
+            )
+        )
+
+        manifest = _run_sync(get_offline_gate_manifest(lot_id=lot_id, db=db))
+        assert manifest["active_pass_count"] >= 1
+
+        sync_batch = _run_sync(
+            synchronize_offline_gate_events(
+                payload=OfflineGateSyncRequest(
+                    terminal_id="GATE-TERM-DEL-01",
+                    events=[
+                        # Valid offline ENTRY
+                        OfflineGateEventItem(
+                            client_event_id="OFF-EVT-001",
+                            lot_id=lot_id,
+                            booking_reference=b_off_paid.booking_reference,
+                            qr_signature=b_off_paid.qr_signature,
+                            vehicle_number="TS-09-OF-4004",
+                            action="ENTRY",
+                            recorded_at=now,
+                        ),
+                        # Conflicting duplicate offline ENTRY on a different client_event_id
+                        OfflineGateEventItem(
+                            client_event_id="OFF-EVT-002-DUP",
+                            lot_id=lot_id,
+                            booking_reference=b_off_paid.booking_reference,
+                            qr_signature=b_off_paid.qr_signature,
+                            vehicle_number="TS-09-OF-4004",
+                            action="ENTRY",
+                            recorded_at=now + timedelta(seconds=20),
+                        ),
+                        # Forged signature in offline queue must be rejected
+                        OfflineGateEventItem(
+                            client_event_id="OFF-EVT-003-FORGED",
+                            lot_id=lot_id,
+                            booking_reference=b_off_paid.booking_reference,
+                            qr_signature="forged_offline_sig_000",
+                            vehicle_number="TS-09-OF-4004",
+                            action="EXIT",
+                            recorded_at=now + timedelta(minutes=30),
+                        ),
+                    ],
+                ),
+                db=db,
+            )
+        )
+        assert sync_batch.synced_count == 1
+        assert sync_batch.conflict_count == 1
+        assert sync_batch.rejected_count == 1
+        outcomes = {r.client_event_id: r.sync_outcome for r in sync_batch.results}
+        assert outcomes["OFF-EVT-001"] == "SYNCED_APPLIED"
+        assert outcomes["OFF-EVT-002-DUP"] == "CONFLICT_DUPLICATE_REPLAY"
+        assert outcomes["OFF-EVT-003-FORGED"] == "REJECTED_INVALID_SIGNATURE"
     finally:
         db.close()
