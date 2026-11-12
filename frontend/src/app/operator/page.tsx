@@ -18,6 +18,8 @@ import {
   IndianRupee,
   Layers,
   LayoutDashboard,
+  MapPin,
+  Maximize2,
   Plus,
   Radio,
   RefreshCw,
@@ -32,9 +34,11 @@ import { useParkwise } from "@/lib/store";
 import { PricingRuleItem, SlotStatus, SlotType } from "@/types";
 import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
 import { AIOperatorConsole } from "@/components/operator/AIOperatorConsole";
+import { LiveOperatorMap } from "@/components/operator/LiveOperatorMap";
 
 type OperatorSection =
   | "OVERVIEW"
+  | "LIVE_MAP"
   | "ANALYTICS_10"
   | "FACILITIES_AND_BAYS"
   | "PRICING_AND_HOURS"
@@ -625,6 +629,12 @@ export default function OperatorDashboardPage() {
       icon: LayoutDashboard,
     },
     {
+      id: "LIVE_MAP",
+      label: "Live Operator Map",
+      badge: "Phase 12",
+      icon: Radio,
+    },
+    {
       id: "ANALYTICS_10",
       label: "10-Module Analytics",
       badge: "10 Charts",
@@ -982,10 +992,82 @@ export default function OperatorDashboardPage() {
             </div>
 
             {/* ============================================================= */}
+            {/* SECTION: PHASE 12 LIVE OPERATOR MAP & FACILITY MONITORING     */}
+            {/* ============================================================= */}
+            {activeSection === "LIVE_MAP" && (
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-5 rounded-3xl border border-slate-200 shadow-apple">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-blue-500/10 text-blue-600 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider">
+                        Phase 12
+                      </span>
+                      <h2 className="text-xl font-black text-slate-900">
+                        Live Operator Map &amp; Facility Monitoring
+                      </h2>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Multi-facility geographical oversight across Indian metro centers. Granular occupancy gauges, entry/exit barrier telemetry, zone operational restrictions, and live bay overrides.
+                    </p>
+                  </div>
+                  <a
+                    href="/operator/map"
+                    target="_blank"
+                    className="flex items-center gap-1.5 rounded-2xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-blue-700 transition shrink-0"
+                  >
+                    <span>Full Screen NOC View</span>
+                    <Maximize2 className="h-4 w-4" />
+                  </a>
+                </div>
+
+                <LiveOperatorMap />
+              </div>
+            )}
+
+            {/* ============================================================= */}
             {/* SECTION 1: OVERVIEW, LIVE OCCUPANCY, WEBSOCKET & AI INSIGHTS  */}
             {/* ============================================================= */}
             {activeSection === "OVERVIEW" && (
               <div className="space-y-6">
+                {/* Phase 12 Live Map NOC Quick Action Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-blue-200 bg-gradient-to-r from-blue-50 via-indigo-50 to-white p-5 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-500/30">
+                      <Radio className="h-5 w-5 animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-black text-slate-900">
+                          Phase 12: Live Operator Map &amp; Facility Monitoring
+                        </h3>
+                        <span className="rounded-full bg-blue-600 text-white px-2 py-0.5 text-[9px] font-extrabold uppercase">
+                          Live NOC
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600">
+                        View all authorized metro facilities, live bay occupancy gauges, barrier clearances, and operational restrictions on the interactive map.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveSection("LIVE_MAP")}
+                      className="rounded-2xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow hover:bg-blue-700 transition"
+                    >
+                      Open Live Map Tab
+                    </button>
+                    <a
+                      href="/operator/map"
+                      target="_blank"
+                      className="flex items-center gap-1.5 rounded-2xl border border-blue-300 bg-white px-3.5 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50 transition"
+                    >
+                      <span>Control Room Fullscreen</span>
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    </a>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
                   {/* Live Occupancy Visualization across Facilities */}
                   <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-apple lg:col-span-7 space-y-4">

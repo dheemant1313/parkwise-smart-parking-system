@@ -196,6 +196,9 @@ from app.router_ecosystem import router as ecosystem_router
 import app.models_facility
 from app.router_facility import router as facility_router
 from app.seed_facility import seed_phase10_facilities
+import app.models_operator_monitoring
+from app.router_operator_monitoring import router as operator_monitoring_router
+from app.services.operator_monitoring_service import seed_monitoring_alerts_if_needed
 from app.privacy import (
     get_dpdp_compliance_summary,
     mask_email,
@@ -211,6 +214,7 @@ async def lifespan(app: FastAPI):
     try:
         seed_initial_data(db)
         seed_phase10_facilities(db)
+        seed_monitoring_alerts_if_needed(db)
     finally:
         db.close()
     yield
@@ -237,6 +241,7 @@ app.add_middleware(
 app.include_router(ecosystem_router)
 app.include_router(facility_router, prefix="/api/v1/parking")
 app.include_router(facility_router, prefix="/api/parking")
+app.include_router(operator_monitoring_router, prefix="/api/v1")
 
 
 @app.middleware("http")
@@ -3348,6 +3353,8 @@ async def websocket_telemetry(websocket: WebSocket):
 
 
 @app.websocket("/ws/operator")
+@app.websocket("/ws/operator/live")
+@app.websocket("/api/v1/ws/operator/live")
 async def websocket_operator_dashboard(websocket: WebSocket):
     await ws_manager.connect(websocket)
     db = SessionLocal()
