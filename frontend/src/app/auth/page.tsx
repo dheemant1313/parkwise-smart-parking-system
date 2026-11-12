@@ -1,804 +1,1177 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
-  AlertCircle,
+  ArrowLeft,
   ArrowRight,
   BatteryCharging,
   Building2,
+  CalendarCheck,
+  Camera,
   CarFront,
+  Check,
   CheckCircle2,
-  ChevronRight,
   Clock,
+  Compass,
   Cpu,
-  Crown,
   Eye,
   EyeOff,
-  Fingerprint,
+  Globe2,
   KeyRound,
-  Laptop,
   Lock,
-  LogIn,
-  LogOut,
   Mail,
+  MapPin,
+  Navigation,
+  Phone,
   QrCode,
-  RefreshCw,
-  Shield,
-  ShieldAlert,
+  Radio,
+  RotateCcw,
   ShieldCheck,
   Sparkles,
-  UserCheck,
-  UserPlus,
-  Users,
+  User,
   Zap,
 } from "lucide-react";
 import { useParkwise } from "@/lib/store";
 import { UserRole } from "@/types";
 
-type LoginPortalMode = "DRIVER" | "OPERATOR" | "ADMIN";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
-export default function InteractiveAuthPage() {
+type AuthTab = "signin" | "signup";
+type SigninMethod = "email" | "phone";
+type AccountType = "DRIVER" | "OPERATOR";
+
+function AuthPageContent() {
   const router = useRouter();
-  const {
-    authUser,
-    loginUser,
-    registerUser,
-    logoutUser,
-    activeRole,
-    setActiveRole,
-    backendConnected,
-    sessions,
-    revokeSession,
-  } = useParkwise();
+  const searchParams = useSearchParams();
+  const { authUser, loginUser, logoutUser, setActiveRole } = useParkwise();
 
-  // Mode: "DRIVER" | "OPERATOR" | "ADMIN" | "REGISTER"
-  const [portalMode, setPortalMode] = useState<LoginPortalMode>("DRIVER");
-  const [authView, setAuthView] = useState<"LOGIN" | "REGISTER" | "MANAGE_SESSION">("LOGIN");
+  // Mode and Method states
+  const initialTab = searchParams?.get("tab") === "signup" ? "signup" : "signin";
+  const [activeTab, setActiveTab] = useState<AuthTab>(initialTab);
+  const [signinMethod, setSigninMethod] = useState<SigninMethod>("email");
+  const [accountType, setAccountType] = useState<AccountType>("DRIVER");
 
-  // Input states
+  // Email form states
   const [email, setEmail] = useState("driver@parkwise.in");
   const [password, setPassword] = useState("parkwise123");
   const [showPassword, setShowPassword] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [biometricScanning, setBiometricScanning] = useState(false);
-  const [feedback, setFeedback] = useState<{
-    type: "success" | "error" | "info";
-    message: string;
-  } | null>(null);
 
-  // Register state
-  const [regFullName, setRegFullName] = useState("");
-  const [regEmail, setRegEmail] = useState("");
-  const [regPhone, setRegPhone] = useState("+91 9811002233");
-  const [regPassword, setRegPassword] = useState("Parkwise2026");
-  const [regRole, setRegRole] = useState<"DRIVER" | "OPERATOR">("DRIVER");
-  const [regPlate, setRegPlate] = useState("DL-01-AB-1234");
-  const [regModel, setRegModel] = useState("Tata Nexon EV");
-  const [regFacilityName, setRegFacilityName] = useState("CyberHub Multi-Level Lot");
+  // Phone OTP states
+  const [phone, setPhone] = useState("+91 98765 43210");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [previewOtp, setPreviewOtp] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
-  // Quick preset loader when switching modes
-  const handleSelectMode = (mode: LoginPortalMode) => {
-    setPortalMode(mode);
-    setFeedback(null);
-    if (mode === "DRIVER") {
+  // Signup form states
+  const [signupStep, setSignupStep] = useState<1 | 2 | 3>(1);
+  const [fullName, setFullName] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPhone, setSignupPhone] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+
+  // Driver Onboarding states (Optional/Skippable)
+  const [vehicleType, setVehicleType] = useState<"SEDAN" | "SUV_XL" | "COMPACT">("SEDAN");
+  const [isEv, setIsEv] = useState(false);
+  const [plateNumber, setPlateNumber] = useState("");
+  const [homeCity, setHomeCity] = useState("New Delhi");
+
+  // Operator Onboarding states (Optional/Skippable)
+  const [businessName, setBusinessName] = useState("");
+  const [facilityName, setFacilityName] = useState("");
+  const [approxCapacity, setApproxCapacity] = useState("200");
+  const [numFloors, setNumFloors] = useState("3");
+
+  // Status & Feedback
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+
+  // OTP Countdown timer
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  // Autofill helpers for quick persona testing
+  const autofillPersona = (role: "driver" | "operator" | "admin") => {
+    setActiveTab("signin");
+    setSigninMethod("email");
+    setErrorMessage(null);
+    if (role === "driver") {
       setEmail("driver@parkwise.in");
       setPassword("parkwise123");
-    } else if (mode === "OPERATOR") {
+    } else if (role === "operator") {
       setEmail("operator@parkwise.in");
       setPassword("parkwise123");
-    } else if (mode === "ADMIN") {
+    } else {
       setEmail("admin@parkwise.in");
       setPassword("parkwise123");
     }
   };
 
-  // Submit handler
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setFeedback(null);
-
-    try {
-      const user = await loginUser(
-        email,
-        password,
-        `${portalMode} Console • Web Client Session`
-      );
-
-      // Verify that user role matches portal mode (unless user is SuperAdmin)
-      if (portalMode === "DRIVER" && user.role !== "DRIVER" && user.role !== "ADMIN") {
-        setFeedback({
-          type: "error",
-          message: `This account has role '${user.role}', but you are attempting Driver Portal login. Please switch to the Operator portal.`,
-        });
-        setBusy(false);
-        return;
-      }
-
-      if (portalMode === "OPERATOR" && user.role !== "OPERATOR" && user.role !== "ADMIN") {
-        setFeedback({
-          type: "error",
-          message: `This account has role '${user.role}', but you are attempting Operator SaaS login. Please switch to the Driver portal.`,
-        });
-        setBusy(false);
-        return;
-      }
-
-      // Synchronize activeRole
-      setActiveRole(user.role);
-
-      setFeedback({
-        type: "success",
-        message: `Welcome, ${user.fullName}! Authenticated as ${user.role}. Redirecting to your console...`,
-      });
-
-      // Redirect strictly based on role
-      setTimeout(() => {
-        if (user.role === "DRIVER") {
-          router.push("/driver");
-        } else if (user.role === "OPERATOR") {
-          router.push("/operator");
-        } else {
-          router.push("/admin");
-        }
-      }, 900);
-    } catch (err) {
-      setFeedback({
-        type: "error",
-        message: err instanceof Error ? err.message : "Authentication failed.",
-      });
-    } finally {
-      setBusy(false);
+  // Redirect based on role
+  const redirectForRole = (role: UserRole) => {
+    if (role === "ADMIN") {
+      router.push("/admin");
+    } else if (role === "OPERATOR") {
+      router.push("/operator");
+    } else if (role === "GATE_STAFF") {
+      router.push("/gate");
+    } else {
+      router.push("/driver");
     }
   };
 
-  // Simulated WebAuthn Biometric Fast Sign-In
-  const handleBiometricAuth = async () => {
-    setBiometricScanning(true);
-    setFeedback({
-      type: "info",
-      message: `Scanning WebAuthn / TouchID for ${portalMode} profile...`,
-    });
-
-    setTimeout(async () => {
-      try {
-        let targetEmail = "driver@parkwise.in";
-        if (portalMode === "OPERATOR") targetEmail = "operator@parkwise.in";
-        if (portalMode === "ADMIN") targetEmail = "admin@parkwise.in";
-
-        const user = await loginUser(
-          targetEmail,
-          "parkwise123",
-          `Biometric FIDO2 • ${portalMode} Authenticator`
-        );
-        setActiveRole(user.role);
-
-        setFeedback({
-          type: "success",
-          message: `Biometric Verified! Authenticated as ${user.fullName} (${user.role}). Redirecting...`,
-        });
-
-        setTimeout(() => {
-          if (user.role === "DRIVER") router.push("/driver");
-          else if (user.role === "OPERATOR") router.push("/operator");
-          else router.push("/admin");
-        }, 800);
-      } catch (err) {
-        setFeedback({
-          type: "error",
-          message: "Biometric authentication failed. Please enter your credentials manually.",
-        });
-      } finally {
-        setBiometricScanning(false);
-      }
-    }, 1200);
-  };
-
-  // Registration handler
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
+  // 1. Handle Email & Password Login
+  const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true);
-    setFeedback(null);
+    setLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
 
     try {
-      const created = await registerUser({
-        fullName: regFullName,
-        email: regEmail,
-        phone: regPhone,
-        password: regPassword,
-        role: regRole,
-        vehicleNumber: regRole === "DRIVER" ? regPlate : undefined,
-        modelName: regRole === "DRIVER" ? regModel : undefined,
-        homeCity: "New Delhi",
-      });
-
-      setFeedback({
-        type: "success",
-        message: `Account created for ${created.fullName} (${created.role})! You are now signed in.`,
-      });
-
-      setActiveRole(created.role);
+      const user = await loginUser(
+        email.trim(),
+        password,
+        "Parkwise Web &bull; Verified Credentials"
+      );
+      setSuccessMessage(`Welcome back, ${user.fullName}! Redirecting...`);
       setTimeout(() => {
-        if (created.role === "DRIVER") router.push("/driver");
-        else router.push("/operator");
-      }, 1000);
+        redirectForRole(user.role);
+      }, 700);
     } catch (err) {
-      setFeedback({
-        type: "error",
-        message: err instanceof Error ? err.message : "Registration failed.",
-      });
+      setErrorMessage(
+        err instanceof Error ? err.message : "Invalid email or password credentials."
+      );
     } finally {
-      setBusy(false);
+      setLoading(false);
+    }
+  };
+
+  // 2. Handle Send Phone OTP
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMessage(null);
+
+    const cleanPhone = phone.replace(/\s+/g, "");
+    if (cleanPhone.length < 10) {
+      setErrorMessage("Please enter a valid 10-digit mobile number.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/send-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: cleanPhone, channel: "SMS" }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Unable to send verification OTP.");
+      }
+
+      setOtpSent(true);
+      setPreviewOtp(data.preview_code || "654321");
+      setResendCooldown(data.cooldown_seconds || 30);
+      setSuccessMessage(`Verification code sent to ${data.phone}.`);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to connect to verification server."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 3. Handle Verify Phone OTP
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMessage(null);
+
+    const cleanPhone = phone.replace(/\s+/g, "");
+    if (!otpCode || otpCode.length < 4) {
+      setErrorMessage("Please enter the 6-digit verification code.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: cleanPhone,
+          otp: otpCode.trim(),
+          role: accountType,
+          device_label: "Web Browser &bull; Phone OTP Session",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Invalid or expired OTP code.");
+      }
+
+      // Update store role and profile
+      setActiveRole(data.role);
+      setSuccessMessage(`Verified! Logging in as ${data.full_name}...`);
+      setTimeout(() => {
+        redirectForRole(data.role);
+      }, 700);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "Verification failed. Check the code."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 4. Handle Google Sign-in Mock/Oauth
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      // Simulate real OAuth authorization callback
+      const targetEmail =
+        accountType === "OPERATOR"
+          ? "operator@parkwise.in"
+          : "driver@parkwise.in";
+      const user = await loginUser(
+        targetEmail,
+        "parkwise123",
+        "Google Workspace &bull; Verified OAuth"
+      );
+      setSuccessMessage(`Signed in with Google as ${user.email}!`);
+      setTimeout(() => {
+        redirectForRole(user.role);
+      }, 700);
+    } catch {
+      setErrorMessage("Google Sign-In authorization failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 5. Handle Real Account Registration
+  const handleRegisterAccount = async (skipOnboarding = false) => {
+    setLoading(true);
+    setErrorMessage(null);
+
+    if (!signupEmail || !signupPassword || !fullName || !signupPhone) {
+      setErrorMessage("Please fill in all required registration fields.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const payload: Record<string, any> = {
+        full_name: fullName.trim(),
+        email: signupEmail.trim().toLowerCase(),
+        phone: signupPhone.replace(/\s+/g, ""),
+        password: signupPassword,
+        role: accountType,
+        home_city: homeCity,
+        is_ev: isEv,
+        size_class: vehicleType,
+      };
+
+      if (!skipOnboarding && plateNumber.trim()) {
+        payload.vehicle_number = plateNumber.trim().toUpperCase();
+      }
+
+      const res = await fetch(`${API_BASE}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Registration failed. Please check inputs.");
+      }
+
+      setSuccessMessage(`Account created! Signing you in...`);
+      // Log in with new credentials
+      const user = await loginUser(
+        signupEmail.trim().toLowerCase(),
+        signupPassword,
+        "Parkwise New User Session"
+      );
+      setTimeout(() => {
+        redirectForRole(user.role);
+      }, 700);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "Unable to complete registration."
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="relative min-h-[calc(100vh-80px)] overflow-hidden bg-slate-950 text-slate-100 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
-      {/* Background Holographic Glow Mesh */}
-      <div className="pointer-events-none absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-brand-500/15 blur-[128px]" />
-      <div className="pointer-events-none absolute top-1/2 -right-40 h-[550px] w-[550px] rounded-full bg-indigo-500/15 blur-[140px]" />
-      <div className="pointer-events-none absolute -bottom-40 left-1/3 h-[500px] w-[500px] rounded-full bg-emerald-500/10 blur-[130px]" />
+    <div className="min-h-screen bg-[#F8FAFC] flex flex-col justify-center">
+      <div className="w-full mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* Top Back Link */}
+        <div className="mb-6 flex items-center justify-between">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-900 transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span>Return to Home</span>
+          </Link>
 
-      <div className="relative mx-auto w-full max-w-4xl">
-        {/* Header Branding */}
-        <div className="text-center">
-          <div className="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-950/50 px-4 py-1.5 text-xs font-bold text-brand-300 backdrop-blur-md">
-            <Sparkles className="h-3.5 w-3.5 text-brand-400 animate-pulse" />
-            <span>PARKWISE ENTERPRISE IDENTITY &amp; RBAC 2.0</span>
+          {/* Quick Demo Persona Autofill Chips */}
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-slate-400 hidden sm:inline">Instant Demo Logins:</span>
+            <button
+              type="button"
+              onClick={() => autofillPersona("driver")}
+              className="rounded-full border border-blue-200 bg-blue-50/80 px-2.5 py-1 font-semibold text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              🚗 Driver
+            </button>
+            <button
+              type="button"
+              onClick={() => autofillPersona("operator")}
+              className="rounded-full border border-indigo-200 bg-indigo-50/80 px-2.5 py-1 font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
+            >
+              🏢 Operator
+            </button>
+            <button
+              type="button"
+              onClick={() => autofillPersona("admin")}
+              className="rounded-full border border-amber-200 bg-amber-50/80 px-2.5 py-1 font-semibold text-amber-700 hover:bg-amber-100 transition-colors"
+            >
+              👑 Admin
+            </button>
           </div>
-
-          <h1 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-4xl md:text-5xl">
-            Choose Your Access Portal
-          </h1>
-          <p className="mt-2 text-sm text-slate-400 max-w-xl mx-auto">
-            Strict role-based operational isolation. Drivers access individual mobility, EV charging &amp; payments. Operators command smart facilities, live cameras &amp; dynamic pricing.
-          </p>
         </div>
 
-        {/* Active Session Status Notification Bar */}
-        {authUser && (
-          <div className="mt-6 rounded-2xl border border-emerald-500/30 bg-emerald-950/30 p-4 backdrop-blur-md">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                  <UserCheck className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-emerald-300">CURRENTLY AUTHENTICATED</span>
-                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-mono font-bold text-emerald-300 border border-emerald-500/30">
-                      {authUser.role}
-                    </span>
-                  </div>
-                  <p className="text-sm font-bold text-white">
-                    {authUser.fullName} <span className="text-xs font-normal text-slate-400">({authUser.email})</span>
-                  </p>
-                </div>
-              </div>
+        {/* Split-Screen Authentication Container */}
+        <div className="grid grid-cols-1 overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-xl lg:grid-cols-12 min-h-[660px]">
+          {/* Left Column: Cinematic Parking Garage Visual (Tesla / Stripe inspired) */}
+          <div className="relative hidden lg:flex lg:col-span-5 flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-10 text-white">
+            {/* Background Ambient Glow & Grid Lines */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(0,102,255,0.22),transparent_70%)] pointer-events-none" />
+            <div className="absolute inset-0 opacity-10 bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:28px_28px] pointer-events-none" />
 
-              <div className="flex items-center gap-2">
-                <Link
-                  href={authUser.role === "DRIVER" ? "/driver" : authUser.role === "OPERATOR" ? "/operator" : "/admin"}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-600/30"
-                >
-                  <span>Go to {authUser.role} Console</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await logoutUser();
-                    setFeedback({ type: "info", message: "You have been logged out safely." });
-                  }}
-                  className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white"
-                >
-                  <LogOut className="h-3.5 w-3.5 inline mr-1" />
-                  Sign Out
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Feedback Alert */}
-        {feedback && (
-          <div
-            className={`mt-4 flex items-start gap-3 rounded-2xl p-4 text-xs font-medium backdrop-blur-md border ${
-              feedback.type === "success"
-                ? "border-emerald-500/40 bg-emerald-950/40 text-emerald-200"
-                : feedback.type === "error"
-                ? "border-rose-500/40 bg-rose-950/40 text-rose-200"
-                : "border-blue-500/40 bg-blue-950/40 text-blue-200"
-            }`}
-          >
-            {feedback.type === "success" ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
-            ) : feedback.type === "error" ? (
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-400 mt-0.5" />
-            ) : (
-              <RefreshCw className="h-4 w-4 shrink-0 text-blue-400 mt-0.5 animate-spin" />
-            )}
-            <div className="flex-1">{feedback.message}</div>
-            <button
-              type="button"
-              onClick={() => setFeedback(null)}
-              className="text-slate-400 hover:text-white ml-2 text-sm leading-none"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        {/* Main Card Container */}
-        <div className="mt-8 rounded-3xl border border-slate-800/80 bg-slate-900/60 p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
-          {/* Top Mode Selector: Driver vs Operator vs Admin */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* 1. Driver Portal */}
-            <button
-              type="button"
-              onClick={() => {
-                setAuthView("LOGIN");
-                handleSelectMode("DRIVER");
-              }}
-              className={`relative flex flex-col p-4 rounded-2xl border text-left transition-all ${
-                portalMode === "DRIVER" && authView === "LOGIN"
-                  ? "border-cyan-500/80 bg-cyan-950/30 ring-2 ring-cyan-500/30 shadow-lg shadow-cyan-500/10"
-                  : "border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/70"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
-                    portalMode === "DRIVER"
-                      ? "border-cyan-400/50 bg-cyan-500/20 text-cyan-300"
-                      : "border-slate-700 bg-slate-800 text-slate-400"
-                  }`}
-                >
-                  <CarFront className="h-5 w-5" />
+            {/* Top Brand Tag */}
+            <div className="relative z-10 space-y-2">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md">
+                  <Cpu className="h-5 w-5" />
                 </div>
-                <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-bold text-cyan-400 border border-cyan-500/20">
-                  CONSUMER MOBILITY
+                <span className="text-xl font-extrabold tracking-tight">
+                  PARKWISE
                 </span>
               </div>
-              <h3 className="mt-3 text-base font-bold text-white">Driver Portal</h3>
-              <p className="mt-1 text-xs text-slate-400 line-clamp-2">
-                Bay booking, 60kW EV charging, FASTag auto-debit, monthly passes, and QR gate pass.
+              <p className="text-xs font-semibold text-blue-400">
+                Smart Parking. Seamless Living.
               </p>
-              <div className="mt-3 text-[11px] font-semibold text-cyan-400 flex items-center gap-1">
-                <span>Direct Access: /driver</span>
-                <ChevronRight className="h-3 w-3" />
-              </div>
-            </button>
-
-            {/* 2. Operator SaaS Console */}
-            <button
-              type="button"
-              onClick={() => {
-                setAuthView("LOGIN");
-                handleSelectMode("OPERATOR");
-              }}
-              className={`relative flex flex-col p-4 rounded-2xl border text-left transition-all ${
-                portalMode === "OPERATOR" && authView === "LOGIN"
-                  ? "border-indigo-500/80 bg-indigo-950/30 ring-2 ring-indigo-500/30 shadow-lg shadow-indigo-500/10"
-                  : "border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/70"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
-                    portalMode === "OPERATOR"
-                      ? "border-indigo-400/50 bg-indigo-500/20 text-indigo-300"
-                      : "border-slate-700 bg-slate-800 text-slate-400"
-                  }`}
-                >
-                  <Building2 className="h-5 w-5" />
-                </div>
-                <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-400 border border-indigo-500/20">
-                  FACILITY OPERATOR
-                </span>
-              </div>
-              <h3 className="mt-3 text-base font-bold text-white">Operator SaaS</h3>
-              <p className="mt-1 text-xs text-slate-400 line-clamp-2">
-                Multi-facility control, XGBoost dynamic surge pricing, ANPR camera streams, and staff roster.
-              </p>
-              <div className="mt-3 text-[11px] font-semibold text-indigo-400 flex items-center gap-1">
-                <span>Direct Access: /operator</span>
-                <ChevronRight className="h-3 w-3" />
-              </div>
-            </button>
-
-            {/* 3. SuperAdmin Master Control */}
-            <button
-              type="button"
-              onClick={() => {
-                setAuthView("LOGIN");
-                handleSelectMode("ADMIN");
-              }}
-              className={`relative flex flex-col p-4 rounded-2xl border text-left transition-all ${
-                portalMode === "ADMIN" && authView === "LOGIN"
-                  ? "border-amber-500/80 bg-amber-950/30 ring-2 ring-amber-500/30 shadow-lg shadow-amber-500/10"
-                  : "border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/70"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
-                    portalMode === "ADMIN"
-                      ? "border-amber-400/50 bg-amber-500/20 text-amber-300"
-                      : "border-slate-700 bg-slate-800 text-slate-400"
-                  }`}
-                >
-                  <Crown className="h-5 w-5" />
-                </div>
-                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-400 border border-amber-500/20">
-                  SUPERADMIN MASTER
-                </span>
-              </div>
-              <h3 className="mt-3 text-base font-bold text-white">Platform Owner</h3>
-              <p className="mt-1 text-xs text-slate-400 line-clamp-2">
-                Universal root access: bypasses all role gates, full telemetry, user management, audit logs.
-              </p>
-              <div className="mt-3 text-[11px] font-semibold text-amber-400 flex items-center gap-1">
-                <span>All Consoles Unlocked</span>
-                <ChevronRight className="h-3 w-3" />
-              </div>
-            </button>
-          </div>
-
-          {/* Tab Navigation: Sign In vs Create Account */}
-          <div className="mt-6 flex items-center justify-between border-t border-slate-800/80 pt-6">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setAuthView("LOGIN")}
-                className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${
-                  authView === "LOGIN"
-                    ? "bg-brand-600 text-white shadow-md shadow-brand-600/30"
-                    : "text-slate-400 hover:text-white hover:bg-slate-800"
-                }`}
-              >
-                Sign In to {portalMode === "DRIVER" ? "Driver Portal" : portalMode === "OPERATOR" ? "Operator SaaS" : "Admin Master"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setAuthView("REGISTER")}
-                className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${
-                  authView === "REGISTER"
-                    ? "bg-brand-600 text-white shadow-md shadow-brand-600/30"
-                    : "text-slate-400 hover:text-white hover:bg-slate-800"
-                }`}
-              >
-                New Account Registration
-              </button>
             </div>
 
-            {/* Quick Demo Autofill Pill */}
-            {authView === "LOGIN" && (
-              <button
-                type="button"
-                onClick={() => handleSelectMode(portalMode)}
-                className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-[11px] font-mono text-slate-300 hover:bg-slate-700 hover:text-white"
-              >
-                <RefreshCw className="h-3 w-3 text-brand-400" />
-                <span>Autofill {portalMode} Demo Credentials</span>
-              </button>
-            )}
-          </div>
-
-          {/* VIEW 1: LOGIN FORM */}
-          {authView === "LOGIN" && (
-            <div className="mt-6 space-y-6">
-              {/* Strict Isolation Notice */}
-              <div
-                className={`rounded-2xl border p-4 text-xs ${
-                  portalMode === "DRIVER"
-                    ? "border-cyan-800/40 bg-cyan-950/20 text-cyan-200"
-                    : portalMode === "OPERATOR"
-                    ? "border-indigo-800/40 bg-indigo-950/20 text-indigo-200"
-                    : "border-amber-800/40 bg-amber-950/20 text-amber-200"
-                }`}
-              >
-                <div className="flex items-start gap-2.5">
-                  <Shield className="h-4 w-4 shrink-0 mt-0.5 text-current" />
-                  <div>
-                    <span className="font-bold uppercase tracking-wider">
-                      {portalMode === "DRIVER"
-                        ? "Driver Data Boundary:"
-                        : portalMode === "OPERATOR"
-                        ? "Facility Operator Boundary:"
-                        : "Root SuperAdmin Key:"}
-                    </span>{" "}
-                    {portalMode === "DRIVER" &&
-                      "Driver accounts have zero visibility into other drivers' bookings, operator revenue streams, or CCTV security cameras. Access is strictly confined to your personal mobility dashboard."}
-                    {portalMode === "OPERATOR" &&
-                      "Operator accounts manage their assigned facilities and dynamic pricing models. You cannot inspect other operators' revenues or private driver profile details."}
-                    {portalMode === "ADMIN" &&
-                      "As the Platform Owner / SuperAdmin, you possess master multi-tenant privileges across Driver Apps, Operator Consoles, Gate Scanners, and System Configurations."}
-                  </div>
-                </div>
-              </div>
-
-              <form onSubmit={handleLoginSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
-                    {portalMode === "DRIVER" ? "Driver Registered Email" : portalMode === "OPERATOR" ? "Operator Work Email" : "SuperAdmin Root Email"}
-                  </label>
-                  <div className="relative mt-1.5">
-                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
-                      <Mail className="h-4 w-4" />
-                    </div>
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder={portalMode === "DRIVER" ? "driver@parkwise.in" : portalMode === "OPERATOR" ? "operator@parkwise.in" : "admin@parkwise.in"}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800/90 pl-10 pr-4 py-2.5 font-mono text-sm font-semibold text-white placeholder-slate-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
-                      Password
-                    </label>
-                    <span className="text-[11px] text-slate-400 font-mono">Default Demo: parkwise123</span>
-                  </div>
-                  <div className="relative mt-1.5">
-                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
-                      <Lock className="h-4 w-4" />
-                    </div>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••••••"
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800/90 pl-10 pr-10 py-2.5 font-mono text-sm font-semibold text-white placeholder-slate-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-white"
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Primary Sign In Button */}
-                <div className="pt-2 flex flex-col sm:flex-row gap-3">
-                  <button
-                    type="submit"
-                    disabled={busy || biometricScanning}
-                    className={`flex-1 inline-flex items-center justify-center gap-2 rounded-xl py-3 px-5 text-sm font-bold text-white transition-all shadow-xl ${
-                      portalMode === "DRIVER"
-                        ? "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-cyan-600/25"
-                        : portalMode === "OPERATOR"
-                        ? "bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-indigo-600/25"
-                        : "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-600/25"
-                    }`}
-                  >
-                    <LogIn className="h-4 w-4" />
-                    <span>{busy ? "Authenticating..." : `Sign In to ${portalMode} Console`}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleBiometricAuth}
-                    disabled={busy || biometricScanning}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-3 text-xs font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
-                  >
-                    <Fingerprint className={`h-4 w-4 text-emerald-400 ${biometricScanning ? "animate-pulse" : ""}`} />
-                    <span>{biometricScanning ? "Verifying..." : "Fast Biometric Sign-In"}</span>
-                  </button>
-                </div>
-              </form>
-
-              {/* 1-Click Fast Switch Buttons for Demonstration */}
-              <div className="mt-6 border-t border-slate-800/80 pt-5">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-3">
-                  Instant One-Click Demo Personas:
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleSelectMode("DRIVER");
-                      setEmail("driver@parkwise.in");
-                      setPassword("parkwise123");
-                    }}
-                    className="flex items-center justify-between rounded-xl border border-cyan-800/30 bg-cyan-950/20 p-2.5 text-left hover:border-cyan-500 hover:bg-cyan-950/40 transition-colors"
-                  >
-                    <div>
-                      <span className="text-[10px] font-bold text-cyan-400">DRIVER</span>
-                      <p className="text-xs font-bold text-white">Rohit Sharma (EV Driver)</p>
-                      <p className="text-[10px] text-slate-400 font-mono">driver@parkwise.in</p>
-                    </div>
-                    <ArrowRight className="h-3.5 w-3.5 text-cyan-400" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleSelectMode("OPERATOR");
-                      setEmail("operator@parkwise.in");
-                      setPassword("parkwise123");
-                    }}
-                    className="flex items-center justify-between rounded-xl border border-indigo-800/30 bg-indigo-950/20 p-2.5 text-left hover:border-indigo-500 hover:bg-indigo-950/40 transition-colors"
-                  >
-                    <div>
-                      <span className="text-[10px] font-bold text-indigo-400">OPERATOR</span>
-                      <p className="text-xs font-bold text-white">Aarav Patel (DLF CyberCity)</p>
-                      <p className="text-[10px] text-slate-400 font-mono">operator@parkwise.in</p>
-                    </div>
-                    <ArrowRight className="h-3.5 w-3.5 text-indigo-400" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleSelectMode("ADMIN");
-                      setEmail("admin@parkwise.in");
-                      setPassword("parkwise123");
-                    }}
-                    className="flex items-center justify-between rounded-xl border border-amber-800/30 bg-amber-950/20 p-2.5 text-left hover:border-amber-500 hover:bg-amber-950/40 transition-colors"
-                  >
-                    <div>
-                      <span className="text-[10px] font-bold text-amber-400">SUPERADMIN</span>
-                      <p className="text-xs font-bold text-white">Platform Owner (Full Access)</p>
-                      <p className="text-[10px] text-slate-400 font-mono">admin@parkwise.in</p>
-                    </div>
-                    <Crown className="h-3.5 w-3.5 text-amber-400" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* VIEW 2: REGISTRATION FORM */}
-          {authView === "REGISTER" && (
-            <form onSubmit={handleRegisterSubmit} className="mt-6 space-y-4">
-              <div className="rounded-xl border border-brand-800/40 bg-brand-950/20 p-3 text-xs text-brand-300">
-                Registering a new account provisions an isolated tenant with cryptographic authentication tokens.
-              </div>
-
+            {/* Middle Cinematic Headline & Availability Cards */}
+            <div className="relative z-10 space-y-6 my-auto">
               <div>
-                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">Account Role</label>
-                <div className="mt-1.5 grid grid-cols-2 gap-3">
+                <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white leading-tight">
+                  Welcome to Smarter Parking.
+                </h2>
+                <p className="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
+                  Experience zero-stop boom barrier entries, live subterranean
+                  indoor navigation, and guaranteed parking bays across India&apos;s
+                  premier metropolitan smart hubs.
+                </p>
+              </div>
+
+              {/* Floating Dynamic Availability Indicators */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur-md">
+                  <div className="flex items-center gap-2.5 text-xs">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
+                      <Radio className="h-3.5 w-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-slate-100">
+                        Jio World Drive BKC
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        18 Bays Open &bull; ₹100/hr
+                      </div>
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[9px] font-bold text-emerald-400">
+                    LIVE
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur-md">
+                  <div className="flex items-center gap-2.5 text-xs">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500/20 text-blue-400">
+                      <Zap className="h-3.5 w-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-slate-100">
+                        EV HyperCharger 50kW
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Bay Reserved &amp; Ready
+                      </div>
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-blue-500/20 px-2 py-0.5 text-[9px] font-bold text-blue-300">
+                    AUTOCUT
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur-md">
+                  <div className="flex items-center gap-2.5 text-xs">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-500/20 text-indigo-400">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-slate-100">
+                        FASTag Boom Barrier
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Verified clearance in &lt;140ms
+                      </div>
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-indigo-500/20 px-2 py-0.5 text-[9px] font-bold text-indigo-300">
+                    CMVR
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Proof Quote */}
+            <div className="relative z-10 border-t border-white/10 pt-4 text-[11px] text-slate-400">
+              &ldquo;Parkwise reduced our garage entry queue times by 78% while
+              optimizing spatial peak yield.&rdquo;
+              <div className="mt-1 font-semibold text-slate-300">
+                — DLF CyberHub Smart Parking Operations
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Clean White Authentication Card (Linear / Notion / Tesla) */}
+          <div className="lg:col-span-7 flex flex-col justify-between p-8 sm:p-12 bg-white">
+            <div>
+              {/* Tab Switcher: Sign In vs Create Account */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+                <div className="inline-flex rounded-full bg-slate-100 p-1">
                   <button
                     type="button"
-                    onClick={() => setRegRole("DRIVER")}
-                    className={`rounded-xl p-3 border text-left font-bold text-xs ${
-                      regRole === "DRIVER"
-                        ? "border-cyan-500 bg-cyan-950/40 text-cyan-300"
-                        : "border-slate-700 bg-slate-800 text-slate-400"
+                    onClick={() => {
+                      setActiveTab("signin");
+                      setErrorMessage(null);
+                      setSuccessMessage(null);
+                    }}
+                    className={`rounded-full px-5 py-1.5 text-xs font-bold transition-all ${
+                      activeTab === "signin"
+                        ? "bg-white text-slate-900 shadow-xs"
+                        : "text-slate-500 hover:text-slate-800"
                     }`}
                   >
-                    🚗 Driver Mobility Account
+                    Sign In
                   </button>
                   <button
                     type="button"
-                    onClick={() => setRegRole("OPERATOR")}
-                    className={`rounded-xl p-3 border text-left font-bold text-xs ${
-                      regRole === "OPERATOR"
-                        ? "border-indigo-500 bg-indigo-950/40 text-indigo-300"
-                        : "border-slate-700 bg-slate-800 text-slate-400"
+                    onClick={() => {
+                      setActiveTab("signup");
+                      setSignupStep(1);
+                      setErrorMessage(null);
+                      setSuccessMessage(null);
+                    }}
+                    className={`rounded-full px-5 py-1.5 text-xs font-bold transition-all ${
+                      activeTab === "signup"
+                        ? "bg-white text-slate-900 shadow-xs"
+                        : "text-slate-500 hover:text-slate-800"
                     }`}
                   >
-                    🏢 Parking Operator Account
+                    Create Account
                   </button>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-300">Full Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={regFullName}
-                    onChange={(e) => setRegFullName(e.target.value)}
-                    placeholder="Vikramaditya Rao"
-                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-semibold text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-300">Email Address</label>
-                  <input
-                    type="email"
-                    required
-                    value={regEmail}
-                    onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="vikram@example.com"
-                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-mono font-semibold text-white"
-                  />
+                <div className="text-[11px] font-medium text-slate-500">
+                  {activeTab === "signin" ? (
+                    <span>New here? <button type="button" onClick={() => setActiveTab("signup")} className="font-bold text-blue-600 hover:underline">Get started</button></span>
+                  ) : (
+                    <span>Have account? <button type="button" onClick={() => setActiveTab("signin")} className="font-bold text-blue-600 hover:underline">Sign in</button></span>
+                  )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-300">Phone Number</label>
-                  <input
-                    type="text"
-                    required
-                    value={regPhone}
-                    onChange={(e) => setRegPhone(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-mono text-white"
-                  />
+              {/* Error & Success Alert Banners */}
+              {errorMessage && (
+                <div className="mb-5 rounded-2xl border border-red-200 bg-red-50/80 p-3.5 text-xs font-semibold text-red-700 animate-in fade-in duration-150">
+                  {errorMessage}
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-300">Choose Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-mono text-white"
-                  />
-                </div>
-              </div>
-
-              {regRole === "DRIVER" ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-800 pt-3">
-                  <div>
-                    <label className="text-xs font-bold text-slate-300">Primary Vehicle Plate</label>
-                    <input
-                      type="text"
-                      value={regPlate}
-                      onChange={(e) => setRegPlate(e.target.value.toUpperCase())}
-                      className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-mono font-bold text-cyan-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-300">Vehicle Model</label>
-                    <input
-                      type="text"
-                      value={regModel}
-                      onChange={(e) => setRegModel(e.target.value)}
-                      className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs text-white"
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="border-t border-slate-800 pt-3">
-                  <label className="text-xs font-bold text-slate-300">Facility / Company Name</label>
-                  <input
-                    type="text"
-                    value={regFacilityName}
-                    onChange={(e) => setRegFacilityName(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs text-white"
-                  />
+              )}
+              {successMessage && (
+                <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3.5 text-xs font-semibold text-emerald-800 animate-in fade-in duration-150">
+                  {successMessage}
                 </div>
               )}
 
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full mt-4 rounded-xl bg-brand-600 py-3 text-sm font-bold text-white hover:bg-brand-500 shadow-lg shadow-brand-600/30 transition-all"
-              >
-                {busy ? "Registering..." : `Create ${regRole} Account`}
-              </button>
-            </form>
-          )}
-        </div>
+              {/* TAB 1: SIGN IN FLOW */}
+              {activeTab === "signin" && (
+                <div className="space-y-6">
+                  <div>
+                    <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
+                      Welcome back.
+                    </h1>
+                    <p className="mt-1 text-xs sm:text-sm text-slate-500">
+                      Sign in to continue your Parkwise experience.
+                    </p>
+                  </div>
 
-        {/* Security & Cryptographic Integrity Footer */}
-        <div className="mt-8 flex flex-wrap items-center justify-between text-xs text-slate-500 border-t border-slate-900 pt-4">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-emerald-400" />
-            <span>FIPS 140-2 Compatible • HMAC-SHA256 Signed Sessions • Zero Plaintext Storage</span>
-          </div>
-          <div className="flex items-center gap-3 font-mono text-[11px]">
-            <span>FastAPI: {backendConnected ? "LIVE 8000" : "LOCAL CACHE"}</span>
-            <span>•</span>
-            <span>RBAC: ENFORCED</span>
+                  {/* Method Selector: Email vs Phone OTP */}
+                  <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-50 p-1 border border-slate-200/70 text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSigninMethod("email");
+                        setOtpSent(false);
+                      }}
+                      className={`flex items-center justify-center gap-2 rounded-xl py-2 transition-all ${
+                        signinMethod === "email"
+                          ? "bg-white text-slate-900 shadow-xs"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      <Mail className="h-3.5 w-3.5" />
+                      <span>Email &amp; Password</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSigninMethod("phone")}
+                      className={`flex items-center justify-center gap-2 rounded-xl py-2 transition-all ${
+                        signinMethod === "phone"
+                          ? "bg-white text-slate-900 shadow-xs"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      <Phone className="h-3.5 w-3.5" />
+                      <span>Phone OTP</span>
+                    </button>
+                  </div>
+
+                  {/* Method A: Email & Password Form */}
+                  {signinMethod === "email" && (
+                    <form onSubmit={handleEmailLogin} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Email Address
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="email"
+                            required
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="name@example.com"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-xs sm:text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-bold text-slate-700">
+                            Password
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setForgotPasswordOpen(true)}
+                            className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                          >
+                            Forgot password?
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type={showPassword ? "text" : "password"}
+                            required
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="••••••••"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 pr-10 text-xs sm:text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword((prev) => !prev)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                          >
+                            {showPassword ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full rounded-full bg-blue-600 py-3 text-xs sm:text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all disabled:opacity-50"
+                      >
+                        {loading ? "Signing in..." : "Sign In to Parkwise"}
+                      </button>
+                    </form>
+                  )}
+
+                  {/* Method B: Phone Number with OTP */}
+                  {signinMethod === "phone" && (
+                    <div className="space-y-4">
+                      {!otpSent ? (
+                        <form onSubmit={handleSendOtp} className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Mobile Number (India)
+                            </label>
+                            <div className="relative flex rounded-2xl border border-slate-200 bg-white">
+                              <span className="flex items-center px-3.5 text-xs font-bold text-slate-500 border-r border-slate-100 bg-slate-50 rounded-l-2xl">
+                                +91
+                              </span>
+                              <input
+                                type="tel"
+                                required
+                                value={phone.replace(/^\+91\s*/, "")}
+                                onChange={(e) => setPhone(`+91 ${e.target.value}`)}
+                                placeholder="98765 43210"
+                                className="w-full rounded-r-2xl px-3.5 py-3 text-xs sm:text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none"
+                              />
+                            </div>
+                            <p className="mt-1 text-[11px] text-slate-400">
+                              We&apos;ll send a 6-digit verification code via SMS.
+                            </p>
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full rounded-full bg-blue-600 py-3 text-xs sm:text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all disabled:opacity-50"
+                          >
+                            {loading ? "Sending Code..." : "Continue with OTP"}
+                          </button>
+                        </form>
+                      ) : (
+                        <form onSubmit={handleVerifyOtp} className="space-y-4">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-xs font-bold text-slate-700">
+                                6-Digit Verification Code
+                              </label>
+                              <span className="text-[11px] text-slate-400">
+                                Sent to {phone}
+                              </span>
+                            </div>
+                            <input
+                              type="text"
+                              maxLength={6}
+                              autoFocus
+                              value={otpCode}
+                              onChange={(e) => setOtpCode(e.target.value)}
+                              placeholder="654321"
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center font-mono text-lg font-bold tracking-widest text-slate-900 focus:border-blue-600 focus:outline-none"
+                            />
+                            {previewOtp && (
+                              <p className="mt-1.5 text-[11px] font-mono text-emerald-600 text-center">
+                                Sandbox Test OTP: <strong>{previewOtp}</strong>
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between text-xs">
+                            <button
+                              type="button"
+                              onClick={() => setOtpSent(false)}
+                              className="font-semibold text-slate-500 hover:text-slate-800"
+                            >
+                              Change Number
+                            </button>
+                            <button
+                              type="button"
+                              disabled={resendCooldown > 0 || loading}
+                              onClick={handleSendOtp}
+                              className="font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-50"
+                            >
+                              {resendCooldown > 0
+                                ? `Resend in ${resendCooldown}s`
+                                : "Resend OTP"}
+                            </button>
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full rounded-full bg-blue-600 py-3 text-xs sm:text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all disabled:opacity-50"
+                          >
+                            {loading ? "Verifying..." : "Verify & Sign In"}
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Social Divider */}
+                  <div className="relative flex items-center justify-center my-4">
+                    <div className="border-t border-slate-200 w-full" />
+                    <span className="bg-white px-3 text-[11px] font-semibold text-slate-400 uppercase">
+                      or
+                    </span>
+                  </div>
+
+                  {/* Google Sign-in */}
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2.5 rounded-full border border-slate-200 bg-white py-2.5 text-xs font-bold text-slate-700 shadow-xs hover:border-slate-300 hover:bg-slate-50 transition-all"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.15z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.17 0 9.98 0 12s.45 3.83 1.25 5.42l4.03-3.15z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+                      />
+                    </svg>
+                    <span>Continue with Google</span>
+                  </button>
+                </div>
+              )}
+
+              {/* TAB 2: SIGNUP & ONBOARDING EXPERIENCE */}
+              {activeTab === "signup" && (
+                <div className="space-y-6">
+                  {/* Step Tracker Indicator */}
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div>
+                      <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">
+                        Get started with Parkwise.
+                      </h1>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {signupStep === 1
+                          ? "Step 1 of 2: Choose your account type"
+                          : signupStep === 2
+                          ? "Step 2 of 2: Enter your basic credentials"
+                          : "Optional: Complete your profile"}
+                      </p>
+                    </div>
+                    <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                      Step {signupStep} / 3
+                    </span>
+                  </div>
+
+                  {/* Step 1: Choose Account Type */}
+                  {signupStep === 1 && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Driver Card */}
+                        <div
+                          onClick={() => setAccountType("DRIVER")}
+                          className={`cursor-pointer rounded-2xl border p-5 transition-all ${
+                            accountType === "DRIVER"
+                              ? "border-blue-600 bg-blue-50/40 ring-1 ring-blue-600 shadow-sm"
+                              : "border-slate-200 hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
+                              <CarFront className="h-5 w-5" />
+                            </div>
+                            {accountType === "DRIVER" && (
+                              <CheckCircle2 className="h-5 w-5 text-blue-600" />
+                            )}
+                          </div>
+                          <div className="mt-3 font-bold text-sm text-slate-900">
+                            Driver Account
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500 leading-relaxed">
+                            Find, book, and navigate to parking spaces with
+                            instant FASTag auto-debit payments.
+                          </p>
+                          <ul className="mt-3 space-y-1 text-[11px] text-slate-600 font-medium">
+                            <li className="flex items-center gap-1.5">
+                              <Check className="h-3 w-3 text-blue-600" />
+                              <span>Find &amp; reserve bays</span>
+                            </li>
+                            <li className="flex items-center gap-1.5">
+                              <Check className="h-3 w-3 text-blue-600" />
+                              <span>Indoor turn-by-turn navigation</span>
+                            </li>
+                            <li className="flex items-center gap-1.5">
+                              <Check className="h-3 w-3 text-blue-600" />
+                              <span>EV hyper-charging reservations</span>
+                            </li>
+                          </ul>
+                        </div>
+
+                        {/* Parking Operator Card */}
+                        <div
+                          onClick={() => setAccountType("OPERATOR")}
+                          className={`cursor-pointer rounded-2xl border p-5 transition-all ${
+                            accountType === "OPERATOR"
+                              ? "border-indigo-600 bg-indigo-50/40 ring-1 ring-indigo-600 shadow-sm"
+                              : "border-slate-200 hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white">
+                              <Building2 className="h-5 w-5" />
+                            </div>
+                            {accountType === "OPERATOR" && (
+                              <CheckCircle2 className="h-5 w-5 text-indigo-600" />
+                            )}
+                          </div>
+                          <div className="mt-3 font-bold text-sm text-slate-900">
+                            Parking Operator
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500 leading-relaxed">
+                            Manage facilities, monitor live occupancy, track
+                            revenue, and automate boom barriers.
+                          </p>
+                          <ul className="mt-3 space-y-1 text-[11px] text-slate-600 font-medium">
+                            <li className="flex items-center gap-1.5">
+                              <Check className="h-3 w-3 text-indigo-600" />
+                              <span>Live facility occupancy desk</span>
+                            </li>
+                            <li className="flex items-center gap-1.5">
+                              <Check className="h-3 w-3 text-indigo-600" />
+                              <span>AI dynamic surge pricing</span>
+                            </li>
+                            <li className="flex items-center gap-1.5">
+                              <Check className="h-3 w-3 text-indigo-600" />
+                              <span>ANPR camera &amp; gate audit</span>
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setSignupStep(2)}
+                        className="w-full flex items-center justify-center gap-2 rounded-full bg-blue-600 py-3 text-xs sm:text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all"
+                      >
+                        <span>Continue to Details</span>
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Step 2: Enter Basic Details */}
+                  {signupStep === 2 && (
+                    <div className="space-y-3.5">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Full Name
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={fullName}
+                          onChange={(e) => setFullName(e.target.value)}
+                          placeholder="e.g. Aarav Sharma"
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Email Address
+                        </label>
+                        <input
+                          type="email"
+                          required
+                          value={signupEmail}
+                          onChange={(e) => setSignupEmail(e.target.value)}
+                          placeholder="name@example.com"
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Phone (+91)
+                          </label>
+                          <input
+                            type="tel"
+                            required
+                            value={signupPhone}
+                            onChange={(e) => setSignupPhone(e.target.value)}
+                            placeholder="9876543210"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Password (min 8 chars)
+                          </label>
+                          <input
+                            type="password"
+                            required
+                            value={signupPassword}
+                            onChange={(e) => setSignupPassword(e.target.value)}
+                            placeholder="Password123"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setSignupStep(1)}
+                          className="rounded-full border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSignupStep(3)}
+                          className="flex-1 rounded-full bg-blue-600 py-2.5 text-xs font-semibold text-white hover:bg-blue-700"
+                        >
+                          Continue to Profile Setup
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step 3: Profile Setup / Onboarding Flow */}
+                  {signupStep === 3 && (
+                    <div className="space-y-4">
+                      {accountType === "DRIVER" ? (
+                        /* Driver Profile Setup */
+                        <div className="space-y-3">
+                          <div className="text-xs font-bold text-slate-800">
+                            Vehicle &amp; City Preferences (Skippable)
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2">
+                            {(["SEDAN", "SUV_XL", "COMPACT"] as const).map((type) => (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => setVehicleType(type)}
+                                className={`rounded-xl border p-2 text-center text-xs font-semibold transition-all ${
+                                  vehicleType === type
+                                    ? "border-blue-600 bg-blue-50 text-blue-700"
+                                    : "border-slate-200 bg-white text-slate-600"
+                                }`}
+                              >
+                                {type === "SUV_XL" ? "SUV / XL" : type}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Vehicle Plate (Optional until booking)
+                            </label>
+                            <input
+                              type="text"
+                              value={plateNumber}
+                              onChange={(e) => setPlateNumber(e.target.value.toUpperCase())}
+                              placeholder="e.g. DL-01-AB-1234"
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 font-mono text-xs text-slate-900 focus:border-blue-600 focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-1">
+                            <input
+                              type="checkbox"
+                              id="isEvCheckbox"
+                              checked={isEv}
+                              onChange={(e) => setIsEv(e.target.checked)}
+                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <label htmlFor="isEvCheckbox" className="text-xs font-medium text-slate-700 cursor-pointer">
+                              Electric Vehicle (Prioritize 50kW charging bays)
+                            </label>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Operator Profile Setup */
+                        <div className="space-y-3">
+                          <div className="text-xs font-bold text-slate-800">
+                            Parking Facility Information (Skippable)
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Business / Management Firm
+                            </label>
+                            <input
+                              type="text"
+                              value={businessName}
+                              onChange={(e) => setBusinessName(e.target.value)}
+                              placeholder="e.g. Nexus Malls Pvt. Ltd."
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                Facility Name
+                              </label>
+                              <input
+                                type="text"
+                                value={facilityName}
+                                onChange={(e) => setFacilityName(e.target.value)}
+                                placeholder="BKC Automated Deck"
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                Total Bays (Approx)
+                              </label>
+                              <input
+                                type="number"
+                                value={approxCapacity}
+                                onChange={(e) => setApproxCapacity(e.target.value)}
+                                placeholder="200"
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-3 pt-3">
+                        <button
+                          type="button"
+                          disabled={loading}
+                          onClick={() => handleRegisterAccount(true)}
+                          className="rounded-full border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Skip for Now
+                        </button>
+                        <button
+                          type="button"
+                          disabled={loading}
+                          onClick={() => handleRegisterAccount(false)}
+                          className="flex-1 rounded-full bg-blue-600 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {loading ? "Creating Account..." : "Complete & Launch"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Footer & Legal */}
+            <div className="mt-8 border-t border-slate-100 pt-4 text-[11px] text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
+              <span>
+                By continuing, you agree to Parkwise&apos;s{" "}
+                <span className="text-slate-600 underline cursor-pointer">Terms</span> and{" "}
+                <span className="text-slate-600 underline cursor-pointer">Privacy Policy</span>.
+              </span>
+              <span className="flex items-center gap-1 text-slate-500 font-medium">
+                <Lock className="h-3 w-3 text-blue-600" />
+                256-Bit PBKDF2-SHA256 Encrypted
+              </span>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      {forgotPasswordOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900">
+                Reset Your Password
+              </h3>
+              <button
+                type="button"
+                onClick={() => setForgotPasswordOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-xs text-slate-500">
+              Enter your registered Parkwise email. We will generate a secure reset link.
+            </p>
+            <input
+              type="email"
+              value={forgotEmail}
+              onChange={(e) => setForgotEmail(e.target.value)}
+              placeholder="name@example.com"
+              className="w-full rounded-2xl border border-slate-200 px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-600"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setForgotPasswordOpen(false)}
+                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSuccessMessage("Password reset email sent (sandbox simulation).");
+                  setForgotPasswordOpen(false);
+                }}
+                className="rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold text-white"
+              >
+                Send Reset Link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500 text-xs font-semibold">
+          Loading Parkwise Secure Authentication...
+        </div>
+      }
+    >
+      <AuthPageContent />
+    </Suspense>
   );
 }

@@ -1,539 +1,546 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import {
   Activity,
   ArrowRight,
+  ArrowUpRight,
   BatteryCharging,
+  Bot,
+  BrainCircuit,
   Building2,
+  CalendarCheck,
   Camera,
   CarFront,
   CheckCircle2,
   ChevronRight,
-  Clock,
-  Coins,
+  Compass,
   Cpu,
-  Crown,
-  Eye,
-  Globe2,
-  KeyRound,
+  CreditCard,
+  Gauge,
   Layers,
-  Lock,
   MapPin,
+  Navigation,
   QrCode,
   Radio,
-  RefreshCw,
-  Search,
-  Shield,
-  ShieldAlert,
+  RotateCcw,
   ShieldCheck,
+  Sliders,
   Sparkles,
-  Ticket,
   TrendingUp,
-  Truck,
-  Users,
-  Wallet,
   Zap,
 } from "lucide-react";
+import { SmartParkingCanvas } from "@/components/three/SmartParkingCanvas";
 import { useParkwise } from "@/lib/store";
-import { formatINR } from "@/lib/utils";
-import { Canvas3DSkeleton } from "@/components/ui/Skeleton";
+import { ParkingSlot } from "@/types";
 
-const SmartParkingCanvas = dynamic(
-  () =>
-    import("@/components/three/SmartParkingCanvas").then(
-      (m) => m.SmartParkingCanvas
-    ),
+// Dynamic demo statistics with transparent labeling
+const DEMO_METRICS = [
   {
-    ssr: false,
-    loading: () => <Canvas3DSkeleton heightClass="h-[460px]" />,
-  }
-);
-
-const TRUST_PARTNERS = [
-  "DLF CyberCity NCR",
-  "Jio World Drive BKC",
-  "NDMC Smart City Grid",
-  "Raheja Mindspace REIT",
-  "Prestige Tech Park Bengaluru",
-  "NPCI FASTag NETC",
+    label: "Smart Parking Facilities",
+    value: "42+",
+    subtext: "Sample Demonstration Network",
+    detail: "Multi-level garages & mall decks",
+  },
+  {
+    label: "Available Parking Spaces",
+    value: "1,840+",
+    subtext: "Real-Time Sensor Connected",
+    detail: "Ultrasonic + camera verified",
+  },
+  {
+    label: "Successful Bookings",
+    value: "128,000+",
+    subtext: "Verified Platform Volume",
+    detail: "<140ms barrier response time",
+  },
+  {
+    label: "Cities Covered",
+    value: "5 Metros",
+    subtext: "National Demonstration Grid",
+    detail: "Delhi NCR, Mumbai, BLR, Pune, HYD",
+  },
 ];
 
-export default function FuturisticLandingPage() {
-  const { lots, bookings, getAIForecast, authUser, activeRole } = useParkwise();
+// 3 How It Works Steps
+const HOW_IT_WORKS_STEPS = [
+  {
+    step: "01",
+    title: "Discover Parking",
+    desc: "Find nearby parking facilities with real-time availability across premium commercial hubs, transit terminals, and retail centres.",
+    icon: Compass,
+    accent: "blue",
+    badge: "Live Availability",
+  },
+  {
+    step: "02",
+    title: "Reserve Your Slot",
+    desc: "Select your exact parking space, EV hyper-charger tier, and complete a secure booking with zero surprise surge tariffs.",
+    icon: CalendarCheck,
+    accent: "indigo",
+    badge: "Guaranteed Bay",
+  },
+  {
+    step: "03",
+    title: "Navigate & Park",
+    desc: "Follow precision navigation from the verified facility entrance all the way down to your exact allotted indoor parking slot.",
+    icon: Navigation,
+    accent: "emerald",
+    badge: "Sub-Meter Indoor AR",
+  },
+];
 
-  // Selected Lot for 3D & Live Radar
-  const [selectedLotId, setSelectedLotId] = useState<number>(1);
-  const [selectedDeckFloor, setSelectedDeckFloor] = useState<number>(1);
+// Smart Technology Interactive Items
+const TECH_FEATURES = [
+  {
+    id: "ai-recommendations",
+    title: "AI-Powered Parking Recommendations",
+    short: "AI Allocation",
+    icon: BrainCircuit,
+    headline: "Machine Intelligence Matching You to the Nearest Available Bay",
+    desc: "Our neural routing model evaluates real-time garage dwell times, your vehicle dimensions, and destination elevators to assign optimal slots automatically.",
+    stats: "Sub-100ms algorithmic bay allocation",
+    highlight: "Context-Aware",
+  },
+  {
+    id: "real-time-slots",
+    title: "Real-Time Slot Availability",
+    short: "Ultrasonic Vision",
+    icon: Radio,
+    headline: "Dual-Modal Telemetry with 99.8% Ground Sensor Parity",
+    desc: "Overhead ultrasonic sensors paired with edge camera vision detect slot state changes within 300ms, eliminating ghost availability and dead miles.",
+    stats: "300ms edge telemetry refresh rate",
+    highlight: "Zero Ghost Bays",
+  },
+  {
+    id: "indoor-nav",
+    title: "Indoor Parking Navigation",
+    short: "Indoor Wayfinding",
+    icon: Navigation,
+    headline: "Flawless Multi-Floor Guidance Where GPS Fails",
+    desc: "Proprietary inertial dead-reckoning and Bluetooth LE beacons guide vehicles across subterranean basement ramps directly to the marked stall.",
+    stats: "Accurate within ±0.6 meters indoors",
+    highlight: "Subterranean Precision",
+  },
+  {
+    id: "qr-fastag",
+    title: "QR-Based Entry & Exit",
+    short: "FASTag & QR",
+    icon: QrCode,
+    headline: "Zero-Stop Boom Barrier Clearance in Under 140ms",
+    desc: "Dual verification using encrypted HMAC dynamic QR codes and NPCI FASTag RFID enables instant barrier opening without rolling down windows.",
+    stats: "<140ms boom barrier latency",
+    highlight: "Contactless Entry",
+  },
+  {
+    id: "smart-pricing",
+    title: "Smart Dynamic Pricing",
+    short: "Dynamic Pricing",
+    icon: TrendingUp,
+    headline: "Adaptive Demand Yield Algorithms for Urban Garages",
+    desc: "Dynamic elasticity curves rebalance congested urban parking demand during peak hours while unlocking 28% to 40% revenue gains for real-estate operators.",
+    stats: "Gradient-boosted price adjustment",
+    highlight: "Demand Responsive",
+  },
+  {
+    id: "ev-charging",
+    title: "EV Charging Reservations",
+    short: "EV Fast Charging",
+    icon: BatteryCharging,
+    headline: "Guaranteed 50kW & 60kW CCS2 DC HyperChargers",
+    desc: "Reserve dual-purpose parking bays equipped with smart DC fast chargers. Automatic cutoff prevents idle hogging fees and optimizes turn rates.",
+    stats: "14.8 MWh clean energy delivered",
+    highlight: "60kW DC HyperCharge",
+  },
+  {
+    id: "parking-analytics",
+    title: "Parking Analytics",
+    short: "Predictive Intelligence",
+    icon: Gauge,
+    headline: "Full-Funnel Spatial Occupancy & Revenue Intelligence",
+    desc: "Deep visual dashboards provide heatmaps of peak arrival windows, average dwell durations, overstay compliance, and predictive turnover forecasts.",
+    stats: "24/7 audit-grade analytics export",
+    highlight: "Enterprise SaaS",
+  },
+];
+
+// Indoor Navigation Demonstration Data
+const INDOOR_FLOORS = [
+  {
+    floor: "Ground",
+    name: "Ground Level (Entry Plaza)",
+    ramp: "Ramp 01 Down to Basement B1",
+    slots: [
+      { id: "G-01", type: "ACCESSIBLE", status: "AVAILABLE" },
+      { id: "G-02", type: "STANDARD", status: "OCCUPIED" },
+      { id: "G-03", type: "STANDARD", status: "OCCUPIED" },
+      { id: "G-04", type: "EV_CHARGING", status: "AVAILABLE" },
+    ],
+    guidance: "Pass Main Security Barrier -> Veer right for Ramp to B1",
+    activeBay: "G-04",
+  },
+  {
+    floor: "B1",
+    name: "Basement B1 (Reserved Deck)",
+    ramp: "Intermediate Floor — Elevator Core A",
+    slots: [
+      { id: "B1-01", type: "STANDARD", status: "OCCUPIED" },
+      { id: "B1-02", type: "EV_CHARGING", status: "AVAILABLE" },
+      { id: "B1-03", type: "SUV_XL", status: "OCCUPIED" },
+      { id: "B1-04", type: "STANDARD", status: "OCCUPIED" },
+      { id: "B1-09", type: "STANDARD", status: "ASSIGNED" },
+      { id: "B1-10", type: "STANDARD", status: "AVAILABLE" },
+    ],
+    guidance: "Descend Ramp 01 -> Turn Left at Pillar P-04 -> Straight 24m -> Bay B1-09 on Right",
+    activeBay: "B1-09",
+  },
+  {
+    floor: "B2",
+    name: "Basement B2 (Fleet & Long-Stay)",
+    ramp: "Deep Deck — Elevator Core B",
+    slots: [
+      { id: "B2-01", type: "STANDARD", status: "AVAILABLE" },
+      { id: "B2-02", type: "STANDARD", status: "AVAILABLE" },
+      { id: "B2-03", type: "SUV_XL", status: "AVAILABLE" },
+      { id: "B2-04", type: "EV_CHARGING", status: "OCCUPIED" },
+    ],
+    guidance: "Continue via Ramp 02 to Basement B2 -> Proceed to Zone C",
+    activeBay: "B2-01",
+  },
+];
+
+export default function HomePage() {
+  const { lots } = useParkwise();
+  const [selectedTech, setSelectedTech] = useState(TECH_FEATURES[0].id);
+  const [activeFloorIndex, setActiveFloorIndex] = useState(1); // Default B1
   const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
 
-  // Live ROI Calculator State
-  const [roiBays, setRoiBays] = useState<number>(200);
-  const [roiBaseRate, setRoiBaseRate] = useState<number>(80);
+  const currentFloor = INDOOR_FLOORS[activeFloorIndex];
+  const activeTechObj =
+    TECH_FEATURES.find((t) => t.id === selectedTech) || TECH_FEATURES[0];
 
-  // Active Lot computation
-  const activeLot = lots.find((l) => l.id === selectedLotId) || lots[0];
-  const aiForecast = getAIForecast(activeLot.id);
-
-  const totalBays = lots.reduce((acc, l) => acc + l.total_slots, 0);
-  const totalAvailable = lots.reduce((acc, l) => acc + l.available_slots, 0);
-  const totalEv = lots.reduce((acc, l) => acc + l.ev_slots_available, 0);
-
-  // ROI calculations
-  const baselineMonthly = roiBays * roiBaseRate * 7 * 30;
-  const parkwiseMonthly = Math.round(baselineMonthly * 1.34);
-  const annualUplift = (parkwiseMonthly - baselineMonthly) * 12;
+  const demoSlots: ParkingSlot[] = lots[0]?.slots || [];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-brand-500 selection:text-white overflow-hidden">
-      {/* ------------------------------------------------------------------ */}
-      {/* 1. TOP LIVE TELEMETRY COMMAND TICKER */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="border-b border-cyan-500/20 bg-slate-950/90 text-slate-300 text-[11px] font-mono tracking-wider backdrop-blur-md sticky top-0 z-40">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-1.5 sm:px-6 lg:px-8 overflow-x-auto gap-4">
-          <div className="flex items-center gap-4 shrink-0">
-            <span className="flex items-center gap-1.5 font-bold text-cyan-400">
-              <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-              TELEMETRY MESH 2026:
-            </span>
-            <span className="text-slate-400">
-              NETWORK OCCUPANCY: <strong className="text-white">87.4%</strong>
-            </span>
-            <span className="text-slate-500">|</span>
-            <span className="text-slate-400">
-              YOLOv8 EDGE INFERENCE: <strong className="text-emerald-400">18.2ms</strong>
-            </span>
-            <span className="text-slate-500">|</span>
-            <span className="text-slate-400">
-              FASTAG BOOM BARRIER: <strong className="text-cyan-300">&lt;140ms</strong>
-            </span>
-            <span className="text-slate-500">|</span>
-            <span className="text-slate-400">
-              EV ENERGY DISPENSED: <strong className="text-emerald-400">14.8 MWh</strong>
-            </span>
-          </div>
-
-          <div className="hidden lg:flex items-center gap-3 shrink-0">
-            <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/30">
-              MoRTH CMVR COMPLIANT
-            </span>
-            <span className="text-slate-400 font-mono text-[10px]">
-              PAN-INDIA SMART CITY GRID
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* 2. FUTURISTIC HERO SECTION */}
-      {/* ------------------------------------------------------------------ */}
-      <section className="relative pt-12 pb-20 sm:pt-20 sm:pb-28">
-        {/* Holographic Radial Gradients */}
-        <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-[600px] w-[900px] rounded-full bg-gradient-to-tr from-cyan-600/20 via-brand-600/20 to-purple-600/20 blur-[140px]" />
-        <div className="pointer-events-none absolute top-1/3 -left-40 h-[400px] w-[400px] rounded-full bg-emerald-600/10 blur-[120px]" />
-
-        <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-4xl mx-auto">
-            {/* Holographic Pill Badge */}
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-950/40 px-4 py-1.5 text-xs font-bold text-cyan-300 backdrop-blur-xl shadow-lg shadow-cyan-500/10 mb-6">
-              <Sparkles className="h-3.5 w-3.5 text-cyan-400 animate-pulse" />
-              <span>THE NEXT-GEN AUTONOMOUS PARKING &amp; EV OPERATING SYSTEM</span>
-              <span className="rounded-full bg-cyan-400/20 px-2 py-0.5 text-[10px] font-mono text-cyan-200">
-                v2.5
-              </span>
-            </div>
-
-            {/* Giant Title */}
-            <h1 className="text-4xl font-black tracking-tight text-white sm:text-6xl md:text-7xl leading-[1.08]">
-              Autonomous Parking.{" "}
-              <span className="bg-gradient-to-r from-cyan-400 via-brand-400 to-indigo-400 bg-clip-text text-transparent">
-                Edge AI Vision.
-              </span>{" "}
-              Zero-Stop Barrier Gates.
-            </h1>
-
-            <p className="mt-6 text-base sm:text-lg text-slate-300 max-w-3xl mx-auto leading-relaxed">
-              Parkwise transforms modern Indian garages into intelligent autonomous mobility hubs. Powered by{" "}
-              <span className="text-white font-semibold">YOLOv8 Computer Vision</span>,{" "}
-              <span className="text-cyan-400 font-semibold">HSRP ANPR plate recognition</span>,{" "}
-              <span className="text-emerald-400 font-semibold">60kW DC HyperCharging</span>, and{" "}
-              <span className="text-indigo-400 font-semibold">XGBoost dynamic surge pricing</span>.
-            </p>
-
-            {/* Prominent Role Gate Access CTAs */}
-            <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-              {/* Driver CTA */}
-              <Link
-                href="/driver"
-                className="group relative inline-flex items-center gap-2.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-4 text-sm font-bold text-white shadow-xl shadow-cyan-500/25 transition-all hover:scale-105 hover:shadow-cyan-500/40 ring-1 ring-white/20"
-              >
-                <CarFront className="h-5 w-5 transition-transform group-hover:-translate-y-0.5" />
-                <span>Launch Driver Mobility App</span>
-                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-              </Link>
-
-              {/* Operator CTA */}
-              <Link
-                href="/operator"
-                className="group relative inline-flex items-center gap-2.5 rounded-2xl border border-indigo-500/50 bg-indigo-950/60 px-6 py-4 text-sm font-bold text-indigo-200 backdrop-blur-xl transition-all hover:bg-indigo-900/60 hover:text-white hover:scale-105 shadow-xl shadow-indigo-950/40"
-              >
-                <Building2 className="h-5 w-5 text-indigo-400 transition-transform group-hover:-translate-y-0.5" />
-                <span>Operator SaaS Command Desk</span>
-                <ArrowRight className="h-4 w-4 text-indigo-400 transition-transform group-hover:translate-x-1" />
-              </Link>
-
-              {/* Ecosystem & Auth Portal */}
-              <Link
-                href="/auth"
-                className="inline-flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/80 px-5 py-4 text-sm font-bold text-slate-300 hover:border-slate-700 hover:text-white transition-all backdrop-blur-md"
-              >
-                <KeyRound className="h-4 w-4 text-amber-400" />
-                <span>Role Login Portal</span>
-              </Link>
-            </div>
-
-            {/* Quick Metrics Bar */}
-            <div className="mt-14 grid grid-cols-2 gap-4 sm:grid-cols-4 max-w-4xl mx-auto">
-              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/50 p-4 backdrop-blur-xl">
-                <div className="text-2xl sm:text-3xl font-black text-white">{totalBays}+</div>
-                <div className="text-xs text-slate-400 mt-1 font-medium">IoT Ultrasonic Bays</div>
-              </div>
-              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/50 p-4 backdrop-blur-xl">
-                <div className="text-2xl sm:text-3xl font-black text-emerald-400">{totalEv} Bays</div>
-                <div className="text-xs text-slate-400 mt-1 font-medium">60kW Fast EV Chargers</div>
-              </div>
-              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/50 p-4 backdrop-blur-xl">
-                <div className="text-2xl sm:text-3xl font-black text-cyan-400">99.4%</div>
-                <div className="text-xs text-slate-400 mt-1 font-medium">HSRP ANPR Accuracy</div>
-              </div>
-              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/50 p-4 backdrop-blur-xl">
-                <div className="text-2xl sm:text-3xl font-black text-indigo-400">+34%</div>
-                <div className="text-xs text-slate-400 mt-1 font-medium">Operator Revenue Uplift</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* 3. INTERACTIVE 3D DIGITAL TWIN GARAGE CANVAS */}
-      {/* ------------------------------------------------------------------ */}
-      <section className="relative py-16 bg-slate-950/80 border-y border-slate-900">
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 selection:bg-blue-600 selection:text-white">
+      {/* 1. HERO SECTION */}
+      <section className="relative overflow-hidden pt-8 pb-16 lg:pt-16 lg:pb-24 border-b border-slate-200/80 bg-gradient-to-b from-white via-slate-50/50 to-slate-100/40">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
-            <div>
-              <span className="rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-400 border border-cyan-500/20">
-                WEBGL 3D DIGITAL TWIN
-              </span>
-              <h2 className="mt-2 text-2xl font-black text-white sm:text-3xl">
-                Spatial Multi-Level Deck Navigation
-              </h2>
-              <p className="mt-1 text-xs sm:text-sm text-slate-400">
-                Inspect live bay geometry, EV hypercharger status, and real-time sensor occupancy in 3D.
+          <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-12">
+            {/* Hero Left Copy */}
+            <div className="lg:col-span-6 space-y-6">
+              {/* Product Badge */}
+              <div className="inline-flex items-center gap-2 rounded-full border border-blue-200/80 bg-blue-50/80 px-3.5 py-1.5 text-xs font-semibold text-blue-700 shadow-xs backdrop-blur-sm">
+                <span className="flex h-2 w-2 rounded-full bg-blue-600 animate-pulse" />
+                <span>Next-Gen Smart Parking &amp; EV Platform</span>
+                <ChevronRight className="h-3.5 w-3.5 text-blue-400" />
+              </div>
+
+              {/* Main Heading */}
+              <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl leading-[1.08]">
+                Parking, <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-600">Reimagined.</span>
+              </h1>
+
+              {/* Supporting Text */}
+              <p className="max-w-xl text-base sm:text-lg leading-relaxed text-slate-600">
+                Find, book, and navigate to your perfect parking spot with intelligent
+                technology. Every journey starts with a smarter parking experience.
               </p>
-            </div>
 
-            {/* Deck Floor Selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400 font-medium">Deck Level:</span>
-              {[1, 2, 3].map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setSelectedDeckFloor(f)}
-                  className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
-                    selectedDeckFloor === f
-                      ? "bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/30"
-                      : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
-                  }`}
+              {/* Primary & Secondary Action CTAs */}
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <Link
+                  href="/driver"
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-blue-600 px-6 py-3.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 hover:shadow-md transition-all active:scale-[0.98]"
                 >
-                  Floor 0{f}
-                </button>
-              ))}
-            </div>
-          </div>
+                  <CarFront className="h-4 w-4" />
+                  <span>Find Parking</span>
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
 
-          {/* 3D Canvas Box */}
-          <div className="relative rounded-3xl border border-slate-800 bg-slate-900/60 p-4 sm:p-6 backdrop-blur-2xl shadow-2xl overflow-hidden">
-            <div className="relative h-[440px] sm:h-[480px] w-full rounded-2xl overflow-hidden bg-slate-950 border border-slate-800/80">
-              <SmartParkingCanvas
-                slots={activeLot.slots}
-                selectedSlotId={selectedSlotId}
-                onSelectSlot={(slot) => setSelectedSlotId(slot.id)}
-              />
-
-              {/* Overlay HUD Badges */}
-              <div className="absolute top-4 left-4 flex flex-col gap-2 pointer-events-none">
-                <div className="inline-flex items-center gap-2 rounded-xl bg-slate-900/85 px-3 py-1.5 text-xs font-mono text-cyan-300 border border-cyan-500/30 backdrop-blur-md">
-                  <Activity className="h-3.5 w-3.5 text-cyan-400 animate-pulse" />
-                  <span>3D TWIN ENGINE: {activeLot.name}</span>
-                </div>
-                <div className="inline-flex items-center gap-2 rounded-xl bg-slate-900/85 px-3 py-1.5 text-xs font-mono text-emerald-400 border border-emerald-500/30 backdrop-blur-md">
-                  <Zap className="h-3.5 w-3.5" />
-                  <span>EV FAST BAYS: {activeLot.ev_slots_available} AVAILABLE</span>
-                </div>
+                <a
+                  href="#how-it-works"
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-6 py-3.5 text-sm font-semibold text-slate-700 shadow-xs hover:border-slate-400 hover:bg-slate-50 transition-all"
+                >
+                  <span>Explore Parkwise</span>
+                </a>
               </div>
 
-              <div className="absolute bottom-4 right-4 pointer-events-none">
-                <div className="rounded-xl bg-slate-900/85 px-3 py-1.5 text-[11px] font-mono text-slate-400 border border-slate-800 backdrop-blur-md">
-                  Click on any bay in 3D to inspect real-time sensor telemetry
+              {/* Verified Trust Badges */}
+              <div className="flex flex-wrap items-center gap-6 pt-4 text-xs font-medium text-slate-500 border-t border-slate-200/70">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span>Zero-Stop Barrier Clearance</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span>Indoor Turn-by-Turn AR</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span>50kW Fast EV Charging</span>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* 4. LIVE METROPOLITAN BAY RADAR & CITY LOT SELECTOR */}
-      {/* ------------------------------------------------------------------ */}
-      <section className="py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-12">
-            <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-400 border border-emerald-500/20">
-              LIVE NETWORK RADAR
-            </span>
-            <h2 className="mt-3 text-3xl font-black text-white sm:text-4xl">
-              Real-Time Metropolitan Indian Hubs
-            </h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Live capacity telemetry across commercial corridors in Delhi NCR, Mumbai BKC, Bengaluru, Pune, and Hyderabad.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {lots.slice(0, 3).map((lot) => {
-              const forecast = getAIForecast(lot.id);
-              const occPct = Math.round(((lot.total_slots - lot.available_slots) / lot.total_slots) * 100);
-
-              return (
-                <div
-                  key={lot.id}
-                  className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur-xl shadow-xl hover:border-slate-700 transition-all flex flex-col justify-between"
-                >
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="rounded-full bg-brand-500/10 px-2.5 py-0.5 text-xs font-bold text-brand-300 border border-brand-500/20">
-                        {lot.city}
-                      </span>
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
-                        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-                        <span>LIVE LOT</span>
-                      </div>
-                    </div>
-
-                    <h3 className="mt-4 text-lg font-bold text-white">{lot.name}</h3>
-                    <p className="mt-1 text-xs text-slate-400 flex items-center gap-1">
-                      <MapPin className="h-3 w-3 text-slate-500 shrink-0" />
-                      {lot.address}
-                    </p>
-
-                    {/* Occupancy bar */}
-                    <div className="mt-5">
-                      <div className="flex justify-between text-xs mb-1.5">
-                        <span className="text-slate-400">Live Occupancy:</span>
-                        <span className="font-bold text-white">{occPct}%</span>
-                      </div>
-                      <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-500"
-                          style={{ width: `${occPct}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-xl bg-slate-950 p-2.5 border border-slate-800/80">
-                        <span className="text-[10px] text-slate-400 block">Available</span>
-                        <strong className="text-emerald-400 font-bold">{lot.available_slots} Bays</strong>
-                      </div>
-                      <div className="rounded-xl bg-slate-950 p-2.5 border border-slate-800/80">
-                        <span className="text-[10px] text-slate-400 block">Base Tariff</span>
-                        <strong className="text-white font-bold">₹{lot.base_hourly_rate_inr}/hr</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between">
-                    <div className="text-xs text-slate-400">
-                      Surge: <strong className="text-cyan-400">{lot.current_surge_multiplier}x</strong>
-                    </div>
-                    <Link
-                      href={`/driver/lots/${lot.id}`}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2 text-xs font-bold text-white hover:bg-brand-500 transition-colors shadow-md shadow-brand-600/30"
-                    >
-                      <span>Book Slot</span>
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </Link>
-                  </div>
+            {/* Hero Right: 3D Parking Garage Environment */}
+            <div className="lg:col-span-6 relative">
+              <div className="relative mx-auto w-full rounded-3xl border border-slate-200/90 bg-white p-2.5 shadow-xl transition-all">
+                {/* Floating Availability Indicators */}
+                <div className="absolute top-5 left-5 z-20 flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/95 px-3 py-1.5 shadow-sm backdrop-blur-md text-[11px] font-semibold text-slate-800">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+                  <span>Bay B1-09 Available &bull; ₹80/hr</span>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* 5. 6 CORE PILLARS OF THE FUTURE TECH MATRIX */}
-      {/* ------------------------------------------------------------------ */}
-      <section className="py-20 bg-slate-950/60 border-t border-slate-900">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-16">
-            <span className="rounded-full bg-indigo-500/10 px-3 py-1 text-xs font-bold text-indigo-400 border border-indigo-500/20">
-              NEXT-GEN INFRASTRUCTURE
-            </span>
-            <h2 className="mt-3 text-3xl font-black text-white sm:text-4xl">
-              Architected for Zero Friction &amp; Absolute Trust
-            </h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Six foundational technological breakthroughs enabling intelligent Indian urban parking.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[
-              {
-                icon: Camera,
-                title: "YOLOv8 Edge Vision & HSRP ANPR",
-                desc: "On-device NVIDIA Jetson inference classifies vehicle types in 18ms with MoRTH Rule 50 optical parsing and automated face redaction.",
-                tag: "Computer Vision",
-                color: "cyan",
-              },
-              {
-                icon: QrCode,
-                title: "Zero-Stop FASTag Boom Barriers",
-                desc: "NPCI NETC dual-frequency RFID scanners lift entry barriers in <140ms with automated toll-wallet debit and instant audit logging.",
-                tag: "RFID NETC",
-                color: "emerald",
-              },
-              {
-                icon: BatteryCharging,
-                title: "60kW DC EV HyperCharging",
-                desc: "OCPP 2.0.1 smart load-balancing bays for CCS2, Type 2 AC, and CHAdeMO with real-time SoC telemetry and idle overstay protection.",
-                tag: "Clean Energy",
-                color: "teal",
-              },
-              {
-                icon: TrendingUp,
-                title: "XGBoost Dynamic Surge AI",
-                desc: "12-hour rolling machine learning models calibrate commercial peak-hour bay tariffs to maximize facility revenue per available bay (RevPAB).",
-                tag: "Machine Learning",
-                color: "indigo",
-              },
-              {
-                icon: MapPin,
-                title: "Shared Driveway Marketplace",
-                desc: "Peer-to-peer private residential stilt bays and driveways monetized effortlessly with transparent 15% platform commission.",
-                tag: "Shared Economy",
-                color: "amber",
-              },
-              {
-                icon: ShieldCheck,
-                title: "Quantum-Grade HMAC QR Passes",
-                desc: "Every digital ticket token is signed server-side with HMAC-SHA256, cryptographically preventing gate replay and forged tickets.",
-                tag: "Zero-Trust Security",
-                color: "purple",
-              },
-            ].map((p, idx) => {
-              const Icon = p.icon;
-              return (
-                <div
-                  key={idx}
-                  className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6 backdrop-blur-xl shadow-xl hover:border-slate-700 transition-all"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-800/80 text-brand-400 border border-slate-700">
-                      <Icon className="h-6 w-6" />
-                    </div>
-                    <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-[10px] font-bold text-slate-300">
-                      {p.tag}
-                    </span>
-                  </div>
-
-                  <h3 className="mt-5 text-base font-bold text-white">{p.title}</h3>
-                  <p className="mt-2 text-xs text-slate-400 leading-relaxed">{p.desc}</p>
+                <div className="absolute top-5 right-5 z-20 hidden sm:flex items-center gap-1.5 rounded-full border border-blue-200/80 bg-blue-50/95 px-3 py-1.5 shadow-sm backdrop-blur-md text-[11px] font-semibold text-blue-700">
+                  <Zap className="h-3.5 w-3.5 text-blue-600" />
+                  <span>60kW DC HyperCharger Ready</span>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* 6. OPERATOR REVENUE ROI CALCULATOR */}
-      {/* ------------------------------------------------------------------ */}
-      <section className="py-20 border-t border-slate-900">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <div className="rounded-3xl border border-indigo-500/30 bg-gradient-to-b from-indigo-950/40 to-slate-950 p-8 sm:p-12 backdrop-blur-xl shadow-2xl">
-            <div className="text-center max-w-2xl mx-auto">
-              <span className="rounded-full bg-indigo-500/10 px-3 py-1 text-xs font-bold text-indigo-400 border border-indigo-500/20">
-                REVENUE CALCULATOR
-              </span>
-              <h2 className="mt-3 text-2xl font-black text-white sm:text-3xl">
-                Calculate Your Facility's AI Revenue Uplift
-              </h2>
-              <p className="mt-1 text-xs sm:text-sm text-slate-400">
-                See how dynamic surge pricing, zero-overstay FASTag settlement, and EV bays elevate annual net operating income.
-              </p>
-            </div>
-
-            <div className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-              {/* Sliders */}
-              <div className="space-y-6">
-                <div>
-                  <div className="flex justify-between text-xs mb-2">
-                    <span className="font-bold text-slate-300">Total Managed Bays</span>
-                    <strong className="text-cyan-400 font-bold">{roiBays} Parking Bays</strong>
-                  </div>
-                  <input
-                    type="range"
-                    min={50}
-                    max={800}
-                    step={25}
-                    value={roiBays}
-                    onChange={(e) => setRoiBays(Number(e.target.value))}
-                    className="w-full accent-cyan-500"
+                {/* 3D WebGL Canvas with Graceful Mobile Fallback */}
+                <div className="h-[380px] sm:h-[420px] w-full overflow-hidden rounded-2xl bg-slate-950">
+                  <SmartParkingCanvas
+                    slots={demoSlots}
+                    selectedSlotId={selectedSlotId}
+                    onSelectSlot={(slot) => setSelectedSlotId(slot.id)}
+                    activeFloor={1}
                   />
                 </div>
 
-                <div>
-                  <div className="flex justify-between text-xs mb-2">
-                    <span className="font-bold text-slate-300">Base Hourly Tariff</span>
-                    <strong className="text-emerald-400 font-bold">₹{roiBaseRate} / hour</strong>
-                  </div>
-                  <input
-                    type="range"
-                    min={40}
-                    max={200}
-                    step={10}
-                    value={roiBaseRate}
-                    onChange={(e) => setRoiBaseRate(Number(e.target.value))}
-                    className="w-full accent-emerald-500"
-                  />
-                </div>
-              </div>
-
-              {/* Result Callout Card */}
-              <div className="rounded-2xl border border-indigo-500/40 bg-indigo-950/60 p-6 text-center shadow-xl">
-                <span className="text-xs uppercase tracking-wider text-indigo-300 font-bold">
-                  PROJECTED ANNUAL INCREMENTAL REVENUE
-                </span>
-                <div className="mt-2 text-3xl sm:text-4xl font-black text-white">
-                  +{formatINR(annualUplift)}
-                </div>
-                <div className="mt-1 text-xs font-bold text-emerald-400">
-                  +34% Revenue Optimization vs Traditional Flat-Rate Parking
-                </div>
-
-                <div className="mt-6 pt-4 border-t border-indigo-900/80 flex items-center justify-between text-xs text-slate-300">
-                  <span>Monthly Projected: {formatINR(parkwiseMonthly)}</span>
+                {/* Bottom Canvas Control Strip */}
+                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 text-[11px] text-slate-500 bg-slate-50 rounded-xl">
+                  <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
+                    <Sparkles className="h-3.5 w-3.5 text-blue-600" />
+                    Interactive 3D Garage Twin &bull; Drag to orbit, tap bays to inspect
+                  </span>
                   <Link
-                    href="/operator"
-                    className="font-bold text-cyan-400 hover:text-white inline-flex items-center gap-1"
+                    href="/driver"
+                    className="font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1"
                   >
-                    <span>Deploy to Lot</span>
+                    <span>Reserve in App</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 2. TRUST AND STATISTICS SECTION */}
+      <section className="py-12 bg-white border-b border-slate-200/80">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            <div>
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Live Demonstration Network Telemetry
+              </h2>
+              <p className="text-sm font-semibold text-slate-700">
+                Operating across verified Indian metropolitan smart corridors
+              </p>
+            </div>
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-medium text-slate-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span>Sample Platform Demonstration Data</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {DEMO_METRICS.map((item) => (
+              <div
+                key={item.label}
+                className="group relative rounded-2xl border border-slate-200/80 bg-slate-50/60 p-5 transition-all hover:border-blue-200 hover:bg-blue-50/30 hover:shadow-xs"
+              >
+                <div className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 group-hover:text-blue-700 transition-colors">
+                  {item.value}
+                </div>
+                <div className="mt-1 text-xs font-bold text-slate-800">
+                  {item.label}
+                </div>
+                <div className="mt-0.5 text-[11px] text-slate-500">
+                  {item.subtext}
+                </div>
+                <div className="mt-2 text-[10px] font-medium text-blue-600 border-t border-slate-200/60 pt-2">
+                  {item.detail}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* 3. HOW IT WORKS SECTION */}
+      <section id="how-it-works" className="py-20 bg-[#F8FAFC]">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-2xl mx-auto space-y-3 mb-14">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-blue-700 border border-blue-200/60">
+              Seamless 3-Step Journey
+            </span>
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
+              How Parkwise Works
+            </h2>
+            <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+              From discovering empty spaces to effortless indoor navigation and
+              autonomous barrier clearance.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+            {HOW_IT_WORKS_STEPS.map((step) => {
+              const Icon = step.icon;
+              return (
+                <div
+                  key={step.title}
+                  className="group relative flex flex-col justify-between rounded-3xl border border-slate-200/80 bg-white p-8 shadow-xs transition-all duration-300 hover:-translate-y-1 hover:border-blue-300 hover:shadow-md"
+                >
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors duration-200">
+                        <Icon className="h-6 w-6" />
+                      </div>
+                      <span className="font-mono text-xs font-extrabold text-slate-400 group-hover:text-blue-600">
+                        STEP {step.step}
+                      </span>
+                    </div>
+
+                    <div className="inline-block rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                      {step.badge}
+                    </div>
+
+                    <h3 className="text-xl font-bold tracking-tight text-slate-900">
+                      {step.title}
+                    </h3>
+                    <p className="text-xs sm:text-sm leading-relaxed text-slate-500">
+                      {step.desc}
+                    </p>
+                  </div>
+
+                  <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-blue-600">
+                    <span>Learn step details</span>
+                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* 4. SMART TECHNOLOGY SECTION */}
+      <section id="technology" className="py-20 bg-white border-y border-slate-200/80">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-3xl mx-auto space-y-3 mb-14">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-blue-700 border border-blue-200/60">
+              Intelligent Architecture
+            </span>
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
+              Smart Technology Built for Indian Transit
+            </h2>
+            <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+              Combining edge computer vision, subterranean IoT positioning, and
+              automated billing protocols.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            {/* Tech Feature Navigation Tabs */}
+            <div className="lg:col-span-5 space-y-2">
+              {TECH_FEATURES.map((tech) => {
+                const Icon = tech.icon;
+                const isSelected = selectedTech === tech.id;
+                return (
+                  <button
+                    key={tech.id}
+                    type="button"
+                    onClick={() => setSelectedTech(tech.id)}
+                    className={`w-full text-left flex items-center justify-between p-4 rounded-2xl border transition-all ${
+                      isSelected
+                        ? "border-blue-600 bg-blue-50/60 text-blue-900 shadow-xs"
+                        : "border-slate-200/70 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                          isSelected
+                            ? "bg-blue-600 text-white"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs sm:text-sm font-bold text-slate-900">
+                          {tech.title}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          {tech.highlight}
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight
+                      className={`h-4 w-4 transition-transform ${
+                        isSelected ? "text-blue-600 translate-x-1" : "text-slate-300"
+                      }`}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Selected Tech Detail Showcase Box */}
+            <div className="lg:col-span-7">
+              <div className="rounded-3xl border border-slate-200/90 bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 p-8 sm:p-10 text-white shadow-xl">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-5">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/20 px-3 py-1 text-xs font-semibold text-blue-300 border border-blue-400/30">
+                    <Cpu className="h-3.5 w-3.5" />
+                    <span>{activeTechObj.highlight}</span>
+                  </div>
+                  <span className="font-mono text-xs text-slate-400">
+                    TELEMETRY: LIVE
+                  </span>
+                </div>
+
+                <div className="mt-6 space-y-4">
+                  <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-white leading-snug">
+                    {activeTechObj.headline}
+                  </h3>
+                  <p className="text-xs sm:text-sm leading-relaxed text-slate-300">
+                    {activeTechObj.desc}
+                  </p>
+                </div>
+
+                {/* Tech Metrics Highlight */}
+                <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-slate-800 pt-6">
+                  <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+                    <div className="text-[11px] font-medium text-slate-400">
+                      Performance Benchmark
+                    </div>
+                    <div className="mt-1 font-mono text-sm sm:text-base font-bold text-emerald-400">
+                      {activeTechObj.stats}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+                    <div className="text-[11px] font-medium text-slate-400">
+                      System Reliability
+                    </div>
+                    <div className="mt-1 font-mono text-sm sm:text-base font-bold text-blue-400">
+                      99.98% High-Availability SLA
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action CTA */}
+                <div className="mt-8 flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-800">
+                  <span className="text-xs text-slate-400">
+                    Explore full technical documentation and API schemas
+                  </span>
+                  <Link
+                    href="/features"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-white text-slate-900 px-4 py-2 text-xs font-bold hover:bg-slate-100 transition-colors"
+                  >
+                    <span>View Architecture Specs</span>
                     <ArrowRight className="h-3.5 w-3.5" />
                   </Link>
                 </div>
@@ -543,175 +550,333 @@ export default function FuturisticLandingPage() {
         </div>
       </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* 7. STRICT ISOLATION ROLE MATRIX (DRIVER VS OPERATOR VS ADMIN) */}
-      {/* ------------------------------------------------------------------ */}
-      <section className="py-20 border-t border-slate-900 bg-slate-950/40">
+      {/* 5. INDOOR NAVIGATION SHOWCASE (CORE DIFFERENTIATOR) */}
+      <section id="features" className="py-20 bg-[#F8FAFC]">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-14">
-            <span className="rounded-full bg-brand-500/10 px-3 py-1 text-xs font-bold text-brand-300 border border-brand-500/20">
-              ZERO-LEAK RBAC SEGREGATION
+          <div className="text-center max-w-3xl mx-auto space-y-3 mb-14">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-blue-700 border border-blue-200/60">
+              Core Differentiator
             </span>
-            <h2 className="mt-3 text-3xl font-black text-white sm:text-4xl">
-              Strict User Privacy &amp; Operator Isolation
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
+              Indoor Navigation. From Verified Entrance to Exact Allotted Slot.
             </h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Every persona operates in an isolated environment with zero cross-tenant data leakage.
+            <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+              Never circle a subterranean basement garage again. Parkwise provides
+              continuous multi-floor turn-by-turn guidance past ramps and pillars.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Driver Column */}
-            <div className="rounded-3xl border border-cyan-500/30 bg-slate-900/60 p-6 backdrop-blur-xl">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-                  <CarFront className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">Driver Portal</h3>
-                  <span className="text-[11px] text-cyan-400 font-mono">Role: DRIVER</span>
+          <div className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-8 shadow-sm">
+            {/* Multi-Floor Switcher Pills */}
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Select Garage Deck:
+                </span>
+                <div className="inline-flex rounded-full bg-slate-100 p-1">
+                  {INDOOR_FLOORS.map((fl, idx) => (
+                    <button
+                      key={fl.floor}
+                      type="button"
+                      onClick={() => setActiveFloorIndex(idx)}
+                      className={`rounded-full px-4 py-1.5 text-xs font-bold transition-all ${
+                        activeFloorIndex === idx
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      {fl.floor}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <ul className="mt-6 space-y-3 text-xs text-slate-300">
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-cyan-400 shrink-0" />
-                  <span>Real-time bay search &amp; 3D navigation</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-cyan-400 shrink-0" />
-                  <span>60kW EV DC Fast Charging bay reservations</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-cyan-400 shrink-0" />
-                  <span>Monthly pass subscriptions with QR tokens</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-cyan-400 shrink-0" />
-                  <span>FASTag wallet &amp; UPI payment receipts</span>
-                </li>
-                <li className="flex items-center gap-2 text-rose-400 pt-2 border-t border-slate-800">
-                  <ShieldAlert className="h-4 w-4 shrink-0" />
-                  <span>Cannot view other drivers or operator revenue</span>
-                </li>
-              </ul>
+              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Indoor Beacons &amp; Dead-Reckoning Connected</span>
+              </div>
             </div>
 
-            {/* Operator Column */}
-            <div className="rounded-3xl border border-indigo-500/30 bg-slate-900/60 p-6 backdrop-blur-xl">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                  <Building2 className="h-5 w-5" />
+            {/* Interactive Floor Demonstration View */}
+            <div className="mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              {/* Turn-by-Turn Instruction Card */}
+              <div className="lg:col-span-5 space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-500">
+                      Active Navigation Session
+                    </span>
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                      {currentFloor.name}
+                    </span>
+                  </div>
+
+                  <div className="flex items-start gap-3 pt-2">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-xs">
+                      <Navigation className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Turn-By-Turn Instruction
+                      </div>
+                      <div className="mt-0.5 text-sm font-semibold text-slate-900">
+                        {currentFloor.guidance}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-600">
+                    <span>Est. Distance to Bay: <strong>38 meters</strong></span>
+                    <span>Walking to Lift: <strong>45 sec</strong></span>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">Operator SaaS</h3>
-                  <span className="text-[11px] text-indigo-400 font-mono">Role: OPERATOR</span>
+
+                <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4 text-xs text-blue-900 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-blue-800">
+                    <Sparkles className="h-3.5 w-3.5 text-blue-600" />
+                    <span>Driver Guarantee</span>
+                  </div>
+                  <p className="text-slate-600">
+                    Your assigned bay <strong>{currentFloor.activeBay}</strong> is locked
+                    and held for your registered vehicle plate. Boom barrier automatically
+                    validates entry upon arrival.
+                  </p>
                 </div>
               </div>
 
-              <ul className="mt-6 space-y-3 text-xs text-slate-300">
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-indigo-400 shrink-0" />
-                  <span>Multi-lot occupancy monitoring in real-time</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-indigo-400 shrink-0" />
-                  <span>XGBoost Dynamic surge tariff controls</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-indigo-400 shrink-0" />
-                  <span>ANPR Gate Staff manual review queue</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-indigo-400 shrink-0" />
-                  <span>Facility staff scheduling &amp; GST compliance</span>
-                </li>
-                <li className="flex items-center gap-2 text-rose-400 pt-2 border-t border-slate-800">
-                  <ShieldAlert className="h-4 w-4 shrink-0" />
-                  <span>Cannot inspect other facilities or driver PII</span>
-                </li>
-              </ul>
-            </div>
+              {/* Floor Plan Schematic Representation */}
+              <div className="lg:col-span-7">
+                <div className="relative rounded-2xl border border-slate-300 bg-slate-900 p-6 text-white shadow-inner">
+                  <div className="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-slate-800 pb-3 mb-4">
+                    <span>{currentFloor.ramp}</span>
+                    <span className="text-blue-400">BLUE TRAIL = ROUTE TO BAY</span>
+                  </div>
 
-            {/* Admin Column */}
-            <div className="rounded-3xl border border-amber-500/30 bg-slate-900/60 p-6 backdrop-blur-xl">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                  <Crown className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">Platform Owner</h3>
-                  <span className="text-[11px] text-amber-400 font-mono">Role: SUPERADMIN</span>
+                  {/* Schematic Garage Bays Grid */}
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                    {currentFloor.slots.map((slot) => {
+                      const isAssigned = slot.status === "ASSIGNED" || slot.id === currentFloor.activeBay;
+                      const isEV = slot.type === "EV_CHARGING";
+                      return (
+                        <div
+                          key={slot.id}
+                          className={`relative flex flex-col items-center justify-center rounded-xl p-3 border transition-all ${
+                            isAssigned
+                              ? "border-blue-400 bg-blue-600/30 text-white shadow-lg ring-2 ring-blue-400"
+                              : slot.status === "AVAILABLE"
+                              ? "border-emerald-500/40 bg-emerald-950/20 text-emerald-300"
+                              : "border-slate-800 bg-slate-950 text-slate-500"
+                          }`}
+                        >
+                          {isAssigned && (
+                            <span className="absolute -top-2 rounded-full bg-blue-500 px-1.5 py-0.2 text-[8px] font-extrabold uppercase text-white shadow">
+                              Allotted
+                            </span>
+                          )}
+                          <span className="font-mono text-xs font-bold">
+                            {slot.id}
+                          </span>
+                          <span className="text-[9px] mt-0.5">
+                            {isEV ? "EV 50kW" : slot.type}
+                          </span>
+                          <span className="mt-1 text-[8px] font-bold uppercase">
+                            {isAssigned ? "Your Bay" : slot.status}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Route Pathway Indicator */}
+                  <div className="mt-6 flex items-center justify-between rounded-xl bg-slate-800/80 px-4 py-2.5 text-xs text-slate-300">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-blue-400 animate-ping" />
+                      <span>Verified Entrance Gate A &bull; Boom Barrier Clear</span>
+                    </div>
+                    <Link
+                      href="/driver"
+                      className="font-bold text-blue-400 hover:text-blue-300 inline-flex items-center gap-1"
+                    >
+                      <span>Try Interactive Driver App</span>
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  </div>
                 </div>
               </div>
-
-              <ul className="mt-6 space-y-3 text-xs text-slate-300">
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-amber-400 shrink-0" />
-                  <span>Universal Master Access to all applications</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-amber-400 shrink-0" />
-                  <span>Switch into Driver, Operator, or Gate view</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-amber-400 shrink-0" />
-                  <span>System-wide security audit trail &amp; tokens</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-amber-400 shrink-0" />
-                  <span>Network multi-location pricing overrides</span>
-                </li>
-                <li className="flex items-center gap-2 text-emerald-400 pt-2 border-t border-slate-800">
-                  <ShieldCheck className="h-4 w-4 shrink-0" />
-                  <span>Full Platform Authority &amp; System Settings</span>
-                </li>
-              </ul>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* 8. FUTURISTIC FOOTER */}
-      {/* ------------------------------------------------------------------ */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-12 text-slate-400 text-xs">
+      {/* 6. FOR BUSINESSES SECTION */}
+      <section id="for-businesses" className="py-20 bg-white border-b border-slate-200/80">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white font-black text-sm">
-                P
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+            {/* Copy Left */}
+            <div className="lg:col-span-5 space-y-6">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-blue-700 border border-blue-200/60">
+                Enterprise Operator SaaS
+              </span>
+
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 leading-tight">
+                The Operating System for Modern Parking Real-Estate
+              </h2>
+
+              <p className="text-sm sm:text-base leading-relaxed text-slate-600">
+                Transform passive concrete parking decks into high-yield,
+                automated mobility hubs. Parkwise delivers complete facility
+                orchestration across cameras, barriers, and dynamic tariffs.
+              </p>
+
+              <div className="space-y-3 pt-2">
+                {[
+                  "Live multi-floor occupancy dashboards with sub-second sync",
+                  "Automated revenue collection with NPCI FASTag integration",
+                  "AI demand forecasting with dynamic surge yield management",
+                  "High-speed ANPR camera surveillance and gate terminal logs",
+                ].map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-3 text-xs sm:text-sm text-slate-700">
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-600">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    </div>
+                    <span>{item}</span>
+                  </div>
+                ))}
               </div>
-              <span className="text-base font-black tracking-tight text-white">PARKWISE</span>
-              <span className="text-[10px] text-slate-500 font-mono ml-2">AUTONOMOUS MOBILITY 2026</span>
+
+              <div className="pt-4">
+                <Link
+                  href="/operator"
+                  className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-6 py-3.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 transition-all"
+                >
+                  <Building2 className="h-4 w-4" />
+                  <span>Explore Business Solutions</span>
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
             </div>
 
-            <div className="flex items-center gap-6">
-              <Link href="/driver" className="hover:text-white transition-colors">
-                Driver App
-              </Link>
-              <Link href="/operator" className="hover:text-white transition-colors">
-                Operator SaaS
-              </Link>
-              <Link href="/ecosystem" className="hover:text-white transition-colors">
-                Ecosystem Hub
-              </Link>
-              <Link href="/auth" className="hover:text-white transition-colors">
-                Login / Auth
-              </Link>
-            </div>
-          </div>
+            {/* Visual Right: Operator SaaS Preview Grid */}
+            <div className="lg:col-span-7">
+              <div className="rounded-3xl border border-slate-200/90 bg-slate-50 p-6 sm:p-8 shadow-sm space-y-6">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="h-3 w-3 rounded-full bg-red-400" />
+                    <div className="h-3 w-3 rounded-full bg-amber-400" />
+                    <div className="h-3 w-3 rounded-full bg-emerald-400" />
+                    <span className="ml-2 text-xs font-bold text-slate-700">
+                      Jio World Drive BKC &bull; Operator Command Desk
+                    </span>
+                  </div>
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                    Surge 1.35x Active
+                  </span>
+                </div>
 
-          <div className="mt-8 pt-6 border-t border-slate-900 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-500">
-            <p>© 2026 Parkwise Technologies Private Limited. All rights reserved. Indian Patent Pending.</p>
-            <div className="flex items-center gap-2 font-mono">
-              <span className="text-emerald-400">● SECURE RBAC ACTIVE</span>
-              <span>•</span>
-              <span>NPCI FASTAG NETC INTEGRATED</span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="text-[11px] font-medium text-slate-500">
+                      Live Occupancy
+                    </div>
+                    <div className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1">
+                      87.4%
+                    </div>
+                    <div className="text-[10px] font-semibold text-emerald-600 mt-0.5">
+                      +12% vs last week
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="text-[11px] font-medium text-slate-500">
+                      Today&apos;s Revenue
+                    </div>
+                    <div className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1">
+                      ₹1,42,850
+                    </div>
+                    <div className="text-[10px] font-semibold text-blue-600 mt-0.5">
+                      FASTag &amp; UPI Auto-Settled
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 col-span-2 sm:col-span-1">
+                    <div className="text-[11px] font-medium text-slate-500">
+                      Barrier Latency
+                    </div>
+                    <div className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1">
+                      112ms
+                    </div>
+                    <div className="text-[10px] font-semibold text-emerald-600 mt-0.5">
+                      Zero Entry Queues
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                      <Camera className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800">
+                        ANPR OCR &amp; CCTV Parity
+                      </div>
+                      <div className="text-slate-500 text-[11px]">
+                        99.4% Indian HSRP plate recognition accuracy
+                      </div>
+                    </div>
+                  </div>
+                  <Link
+                    href="/operator"
+                    className="font-bold text-blue-600 hover:text-blue-700"
+                  >
+                    Open Console
+                  </Link>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </footer>
+      </section>
+
+      {/* 7. FINAL CTA */}
+      <section className="py-20 bg-gradient-to-b from-white to-slate-100/60">
+        <div className="mx-auto max-w-5xl px-4 text-center sm:px-6 lg:px-8 space-y-6">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3.5 py-1 text-xs font-bold uppercase tracking-wider text-blue-700 border border-blue-200/60">
+            Start Today
+          </span>
+
+          <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900">
+            Make Every Parking Experience Smarter.
+          </h2>
+
+          <p className="max-w-2xl mx-auto text-sm sm:text-base text-slate-600 leading-relaxed">
+            Join thousands of urban drivers and India&apos;s leading commercial
+            facilities already experiencing zero-stop, intelligent parking.
+          </p>
+
+          <div className="flex flex-wrap items-center justify-center gap-3.5 pt-4">
+            <Link
+              href="/auth?tab=signup"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-blue-600 px-7 py-3.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 hover:shadow-md transition-all active:scale-[0.98]"
+            >
+              <span>Get Started</span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+
+            <Link
+              href="/business"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-7 py-3.5 text-sm font-semibold text-slate-700 shadow-xs hover:border-slate-400 hover:bg-slate-50 transition-all"
+            >
+              <Building2 className="h-4 w-4 text-slate-500" />
+              <span>Partner With Parkwise</span>
+            </Link>
+          </div>
+
+          <div className="pt-8 text-[11px] font-medium text-slate-400">
+            Instant Setup &bull; CMVR Compliant &bull; 99.4% ANPR Accuracy &bull; 24/7 Enterprise SLA
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

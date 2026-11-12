@@ -133,6 +133,18 @@ class RegisterRequest(BaseModel):
         return normalized
 
 
+class SendOtpRequest(BaseModel):
+    phone: str = Field(..., min_length=10, max_length=20)
+    channel: str = Field("SMS", pattern="^(SMS|WHATSAPP)$")
+
+
+class VerifyOtpRequest(BaseModel):
+    phone: str = Field(..., min_length=10, max_length=20)
+    otp: str = Field(..., min_length=4, max_length=8)
+    role: str = Field("DRIVER")
+    device_label: str = Field("Web Browser Session", max_length=120)
+
+
 class EmailVerificationRequest(BaseModel):
     token: str = Field(..., min_length=6, max_length=128)
 

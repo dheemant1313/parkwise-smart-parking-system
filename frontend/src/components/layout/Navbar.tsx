@@ -1,198 +1,237 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity,
   ArrowRight,
   Building2,
   CarFront,
+  ChevronDown,
   Cpu,
   KeyRound,
+  Layers,
   Menu,
   QrCode,
-  RotateCcw,
   ShieldCheck,
+  Sparkles,
   X,
 } from "lucide-react";
 import { useParkwise } from "@/lib/store";
 import { UserRole } from "@/types";
 
-const PUBLIC_NAV_LINKS = [
-  { href: "/", label: "Overview" },
-  { href: "/features", label: "Features" },
-  { href: "/business", label: "Business Solutions" },
-  { href: "/pricing", label: "Pricing" },
-  { href: "/ecosystem", label: "Ecosystem" },
-  { href: "/about", label: "About" },
+const NAV_LINKS = [
+  { href: "/#features", label: "Features" },
+  { href: "/#how-it-works", label: "How It Works" },
+  { href: "/#for-businesses", label: "For Businesses" },
+  { href: "/#technology", label: "Technology" },
   { href: "/contact", label: "Contact" },
 ];
 
-const CONSOLE_LINKS = [
-  { href: "/driver", label: "Driver App", icon: CarFront },
-  { href: "/operator", label: "Operator SaaS", icon: Building2 },
-  { href: "/ecosystem", label: "Ecosystem Hub", icon: Cpu },
-  { href: "/gate", label: "Gate Terminal", icon: QrCode },
-  { href: "/admin", label: "Admin Console", icon: ShieldCheck },
-  { href: "/auth", label: "Auth & RBAC", icon: KeyRound },
+const PLATFORM_APPS = [
+  {
+    href: "/driver",
+    name: "Driver Mobility App",
+    desc: "Find, reserve & navigate to smart parking",
+    icon: CarFront,
+    color: "text-blue-600 bg-blue-50",
+  },
+  {
+    href: "/operator",
+    name: "Operator SaaS Console",
+    desc: "Manage facilities, revenue & dynamic surge",
+    icon: Building2,
+    color: "text-indigo-600 bg-indigo-50",
+  },
+  {
+    href: "/gate",
+    name: "Gate Terminal & Scanner",
+    desc: "FASTag RFID & ANPR boom barrier control",
+    icon: QrCode,
+    color: "text-emerald-600 bg-emerald-50",
+  },
+  {
+    href: "/ecosystem",
+    name: "Ecosystem Hub",
+    desc: "EV bays, subscriptions & fleet wallets",
+    icon: Cpu,
+    color: "text-cyan-600 bg-cyan-50",
+  },
+  {
+    href: "/admin",
+    name: "Platform Administrator",
+    desc: "Master multi-tenant root control desk",
+    icon: ShieldCheck,
+    color: "text-amber-600 bg-amber-50",
+  },
 ];
-
-const ROLES: UserRole[] = ["DRIVER", "OPERATOR", "GATE_STAFF", "ADMIN"];
 
 export function Navbar() {
   const pathname = usePathname();
-  const {
-    authUser,
-    activeRole,
-    setActiveRole,
-    backendConnected,
-    resetDemoState,
-  } = useParkwise();
+  const { authUser, logoutUser } = useParkwise();
+  const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [appsDropdownOpen, setAppsDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 12);
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
-      {/* Top Enterprise Operational Bar */}
-      <div className="border-b border-slate-100 bg-slate-900 text-slate-300">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-1.5 sm:px-6 lg:px-8 text-[11px]">
-          <div className="flex items-center gap-3 overflow-x-auto">
-            <span className="font-bold uppercase tracking-wider text-brand-300">
-              Live Applications:
-            </span>
-            {CONSOLE_LINKS.map((item) => {
-              const Icon = item.icon;
-              const active = pathname?.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-semibold transition-colors whitespace-nowrap ${
-                    active
-                      ? "bg-brand-600 text-white"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                  }`}
-                >
-                  <Icon className="h-3 w-3" />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </div>
-
-          <div className="hidden md:flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400">
-              <Activity className="h-3 w-3 animate-pulse" />
-              {backendConnected
-                ? "FastAPI + SQLAlchemy Live"
-                : "Transactional Engine Active"}
-            </span>
-            <Link
-              href="/auth"
-              className="inline-flex items-center gap-1 rounded bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-blue-300 hover:bg-slate-700 hover:text-white"
-            >
-              <KeyRound className="h-2.5 w-2.5" />
-              <span>
-                {authUser ? `${authUser.email} (${authUser.role})` : "Sign In"}
-              </span>
-            </Link>
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-slate-400">RBAC:</span>
-              <select
-                aria-label="Active RBAC Role"
-                value={activeRole}
-                onChange={(e) => setActiveRole(e.target.value as UserRole)}
-                className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-bold text-white focus:outline-none"
-              >
-                {ROLES.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={resetDemoState}
-              className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-white"
-            >
-              <RotateCcw className="h-2.5 w-2.5" />
-              <span>Reset Demo</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Marketing & Product Navigation */}
+    <header
+      className={`sticky top-0 z-50 w-full transition-all duration-300 ${
+        scrolled
+          ? "border-b border-slate-200/80 bg-white/85 backdrop-blur-xl shadow-xs"
+          : "border-b border-transparent bg-white/60 backdrop-blur-md"
+      }`}
+    >
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3.5 sm:px-6 lg:px-8">
-        <Link href="/" className="flex items-center gap-3 group">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white shadow-stripe transition-transform group-hover:scale-105">
+        {/* Brand Logo & Tagline */}
+        <Link href="/" className="group flex items-center gap-3">
+          <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-700 via-blue-600 to-indigo-600 text-white shadow-sm transition-transform group-hover:scale-105">
             <Cpu className="h-5 w-5" />
+            <div className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-white" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-lg font-extrabold tracking-tight text-slate-900">
-                PARKWISE
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1.5">
+              <span className="text-base font-bold tracking-tight text-slate-900">
+                Parkwise
               </span>
-              <span className="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-600">
+              <span className="rounded-full bg-blue-50 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider text-blue-700 border border-blue-200/70">
                 India
               </span>
             </div>
-            <p className="text-[11px] font-medium text-slate-500">
-              AI Smart Parking Ecosystem
-            </p>
+            <span className="text-[10px] font-medium text-slate-500 tracking-tight">
+              Smart Parking. Seamless Living.
+            </span>
           </div>
         </Link>
 
-        {/* Desktop Links */}
+        {/* Center Desktop Navigation */}
         <nav
-          aria-label="Primary Navigation"
-          className="hidden lg:flex items-center gap-1"
+          aria-label="Main Navigation"
+          className="hidden lg:flex items-center gap-1 text-[13px] font-medium text-slate-600"
         >
-          {PUBLIC_NAV_LINKS.map((item) => {
-            const isActive =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname?.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${
-                  isActive
-                    ? "bg-brand-50 text-brand-600"
-                    : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900"
+          {NAV_LINKS.map((link) => (
+            <Link
+              key={link.label}
+              href={link.href}
+              className="rounded-full px-3.5 py-1.5 transition-colors hover:text-slate-900 hover:bg-slate-100/70"
+            >
+              {link.label}
+            </Link>
+          ))}
+
+          {/* Platform Console Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setAppsDropdownOpen((prev) => !prev)}
+              onBlur={() => setTimeout(() => setAppsDropdownOpen(false), 200)}
+              className="inline-flex items-center gap-1 rounded-full px-3.5 py-1.5 transition-colors hover:text-slate-900 hover:bg-slate-100/70"
+            >
+              <span>Platform</span>
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform duration-200 ${
+                  appsDropdownOpen ? "rotate-180 text-blue-600" : ""
                 }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
+              />
+            </button>
+
+            {appsDropdownOpen && (
+              <div className="absolute top-full left-0 mt-2 w-80 rounded-2xl border border-slate-200/80 bg-white/95 p-2 shadow-xl backdrop-blur-xl z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Live Applications
+                </div>
+                <div className="space-y-1">
+                  {PLATFORM_APPS.map((app) => {
+                    const Icon = app.icon;
+                    return (
+                      <Link
+                        key={app.href}
+                        href={app.href}
+                        onClick={() => setAppsDropdownOpen(false)}
+                        className="group flex items-start gap-3 rounded-xl p-2.5 transition-colors hover:bg-slate-50"
+                      >
+                        <div
+                          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${app.color}`}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">
+                            {app.name}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {app.desc}
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </nav>
 
-        {/* Primary & Secondary Action CTAs */}
-        <div className="hidden sm:flex items-center gap-2.5">
-          <Link
-            href="/business"
-            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:border-brand-300 hover:text-brand-600 transition-colors"
-          >
-            Explore for Business
-          </Link>
-          <Link
-            href="/driver"
-            className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2 text-xs font-bold text-white shadow-stripe hover:bg-brand-700 transition-all"
-          >
-            <span>Find Parking</span>
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+        {/* Right Action CTAs */}
+        <div className="hidden sm:flex items-center gap-3">
+          {authUser ? (
+            <div className="flex items-center gap-2">
+              <Link
+                href={
+                  authUser.role === "ADMIN"
+                    ? "/admin"
+                    : authUser.role === "OPERATOR"
+                    ? "/operator"
+                    : "/driver"
+                }
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 shadow-xs hover:border-slate-300 hover:bg-slate-50 transition-all"
+              >
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                <span className="max-w-[120px] truncate">{authUser.fullName || authUser.email}</span>
+                <span className="text-[10px] uppercase font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                  {authUser.role}
+                </span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => logoutUser()}
+                className="text-xs text-slate-500 hover:text-slate-900 px-2 py-1 transition-colors"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <>
+              <Link
+                href="/auth"
+                className="rounded-full px-4 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100/70 transition-colors"
+              >
+                Log In
+              </Link>
+              <Link
+                href="/auth?tab=signup"
+                className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 hover:shadow transition-all"
+              >
+                <span>Get Started</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </>
+          )}
         </div>
 
-        {/* Mobile Menu Trigger */}
+        {/* Mobile Hamburger Trigger */}
         <button
           type="button"
-          aria-label="Toggle Menu"
+          aria-label="Toggle Navigation Menu"
           onClick={() => setMobileMenuOpen((prev) => !prev)}
-          className="inline-flex items-center justify-center rounded-xl border border-slate-200 p-2 text-slate-700 lg:hidden"
+          className="inline-flex items-center justify-center rounded-xl border border-slate-200 p-2 text-slate-700 lg:hidden hover:bg-slate-100 transition-colors"
         >
           {mobileMenuOpen ? (
             <X className="h-5 w-5" />
@@ -202,37 +241,75 @@ export function Navbar() {
         </button>
       </div>
 
-      {/* Responsive Mobile Navigation Drawer */}
+      {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="border-t border-slate-200 bg-white px-4 py-4 lg:hidden space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            {PUBLIC_NAV_LINKS.map((item) => (
+        <div className="border-t border-slate-200/80 bg-white/95 backdrop-blur-xl px-5 py-6 lg:hidden space-y-4 animate-in fade-in duration-200">
+          <div className="flex flex-col space-y-1">
+            {NAV_LINKS.map((link) => (
               <Link
-                key={item.href}
-                href={item.href}
+                key={link.label}
+                href={link.href}
                 onClick={() => setMobileMenuOpen(false)}
-                className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 hover:border-brand-300"
+                className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900"
               >
-                {item.label}
+                {link.label}
               </Link>
             ))}
           </div>
-          <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
-            <Link
-              href="/driver"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex items-center justify-center gap-2 rounded-xl bg-brand-600 py-2.5 text-xs font-bold text-white"
-            >
-              <span>Find Parking</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-            <Link
-              href="/business"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex items-center justify-center rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-700"
-            >
-              Explore for Business
-            </Link>
+
+          <div className="border-t border-slate-100 pt-3">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-3">
+              Platform Consoles
+            </div>
+            <div className="grid grid-cols-1 gap-1">
+              {PLATFORM_APPS.map((app) => {
+                const Icon = app.icon;
+                return (
+                  <Link
+                    key={app.href}
+                    href={app.href}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                  >
+                    <Icon className="h-4 w-4 text-blue-600" />
+                    <span>{app.name}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 pt-3 flex flex-col gap-2">
+            {authUser ? (
+              <button
+                type="button"
+                onClick={() => {
+                  logoutUser();
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full text-center rounded-full border border-slate-200 py-2.5 text-xs font-semibold text-slate-700"
+              >
+                Sign Out ({authUser.email})
+              </button>
+            ) : (
+              <>
+                <Link
+                  href="/auth"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex items-center justify-center rounded-full border border-slate-200 py-2.5 text-xs font-semibold text-slate-700"
+                >
+                  Log In
+                </Link>
+                <Link
+                  href="/auth?tab=signup"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex items-center justify-center gap-1.5 rounded-full bg-blue-600 py-2.5 text-xs font-semibold text-white shadow-sm"
+                >
+                  <span>Get Started</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </>
+            )}
           </div>
         </div>
       )}
