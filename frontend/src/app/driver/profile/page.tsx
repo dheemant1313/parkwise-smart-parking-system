@@ -19,6 +19,7 @@ import { useParkwise } from "@/lib/store";
 import { isValidIndianPlate } from "@/lib/utils";
 import { DriverSubNav } from "@/components/driver/DriverSubNav";
 import { VehicleSize } from "@/types";
+import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
 
 const SIZE_DIMENSIONS_MAP: Record<
   VehicleSize,
@@ -123,8 +124,12 @@ export default function DriverProfilePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-24">
-      <DriverSubNav />
+    <ProtectedRouteGate
+      allowedRoles={["DRIVER", "ADMIN"]}
+      applicationName="Driver Profile & Garage"
+    >
+      <div className="min-h-screen bg-[#F8FAFC] pb-24">
+        <DriverSubNav />
 
       {/* Header */}
       <section className="border-b border-slate-200/80 bg-white py-8">
@@ -567,5 +572,6 @@ export default function DriverProfilePage() {
         </div>
       </div>
     </div>
+    </ProtectedRouteGate>
   );
 }

@@ -25,6 +25,7 @@ import { formatDateTime, formatINR } from "@/lib/utils";
 import { DriverSubNav } from "@/components/driver/DriverSubNav";
 import { QrPassModal } from "@/components/driver/QrPassModal";
 import { Booking } from "@/types";
+import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
 
 export default function DriverBookingsPage() {
   const {
@@ -132,8 +133,12 @@ export default function DriverBookingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-24">
-      <DriverSubNav />
+    <ProtectedRouteGate
+      allowedRoles={["DRIVER", "ADMIN"]}
+      applicationName="Driver Bookings"
+    >
+      <div className="min-h-screen bg-[#F8FAFC] pb-24">
+        <DriverSubNav />
 
       {/* Header */}
       <section className="border-b border-slate-200/80 bg-white py-8">
@@ -594,5 +599,6 @@ export default function DriverBookingsPage() {
         />
       )}
     </div>
+    </ProtectedRouteGate>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   Sparkles,
   X,
+  Zap,
 } from "lucide-react";
 import { useParkwise } from "@/lib/store";
 import { UserRole } from "@/types";
@@ -28,13 +29,14 @@ const NAV_LINKS = [
   { href: "/contact", label: "Contact" },
 ];
 
-const PLATFORM_APPS = [
+const ALL_PLATFORM_APPS = [
   {
     href: "/driver",
     name: "Driver Mobility App",
     desc: "Find, reserve & navigate to smart parking",
     icon: CarFront,
     color: "text-blue-600 bg-blue-50",
+    roles: ["DRIVER", "ADMIN"],
   },
   {
     href: "/operator",
@@ -42,6 +44,7 @@ const PLATFORM_APPS = [
     desc: "Manage facilities, revenue & dynamic surge",
     icon: Building2,
     color: "text-indigo-600 bg-indigo-50",
+    roles: ["OPERATOR", "ADMIN"],
   },
   {
     href: "/gate",
@@ -49,6 +52,7 @@ const PLATFORM_APPS = [
     desc: "FASTag RFID & ANPR boom barrier control",
     icon: QrCode,
     color: "text-emerald-600 bg-emerald-50",
+    roles: ["OPERATOR", "GATE_STAFF", "ADMIN"],
   },
   {
     href: "/ecosystem",
@@ -56,6 +60,7 @@ const PLATFORM_APPS = [
     desc: "EV bays, subscriptions & fleet wallets",
     icon: Cpu,
     color: "text-cyan-600 bg-cyan-50",
+    roles: ["DRIVER", "OPERATOR", "ADMIN"],
   },
   {
     href: "/admin",
@@ -63,6 +68,7 @@ const PLATFORM_APPS = [
     desc: "Master multi-tenant root control desk",
     icon: ShieldCheck,
     color: "text-amber-600 bg-amber-50",
+    roles: ["ADMIN"],
   },
 ];
 
@@ -80,6 +86,82 @@ export function Navbar() {
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  // Strict role-filtered platform apps: Drivers NEVER see Operator, Operators NEVER see Driver
+  const visibleApps = useMemo(() => {
+    if (!authUser) {
+      // Unauthenticated visitor sees public apps
+      return ALL_PLATFORM_APPS.filter((a) => a.href !== "/admin");
+    }
+    if (authUser.role === "ADMIN") {
+      return ALL_PLATFORM_APPS;
+    }
+    if (authUser.role === "DRIVER") {
+      return [
+        {
+          href: "/driver",
+          name: "Driver Mobility App",
+          desc: "Find, reserve & navigate to smart parking",
+          icon: CarFront,
+          color: "text-blue-600 bg-blue-50",
+        },
+        {
+          href: "/driver/bookings",
+          name: "My Bookings & Passes",
+          desc: "Active reservations, QR passes & history",
+          icon: QrCode,
+          color: "text-emerald-600 bg-emerald-50",
+        },
+        {
+          href: "/driver/profile",
+          name: "Garage & Vehicles",
+          desc: "FASTag tags, plate numbers & EV status",
+          icon: Cpu,
+          color: "text-indigo-600 bg-indigo-50",
+        },
+        {
+          href: "/ecosystem",
+          name: "Ecosystem Hub",
+          desc: "EV bays, subscriptions & fleet wallets",
+          icon: Zap,
+          color: "text-cyan-600 bg-cyan-50",
+        },
+      ];
+    }
+    if (authUser.role === "OPERATOR") {
+      return [
+        {
+          href: "/operator",
+          name: "Operator SaaS Console",
+          desc: "Manage facilities, revenue & dynamic surge",
+          icon: Building2,
+          color: "text-indigo-600 bg-indigo-50",
+        },
+        {
+          href: "/gate",
+          name: "Gate Terminal & Scanner",
+          desc: "FASTag RFID & ANPR boom barrier control",
+          icon: QrCode,
+          color: "text-emerald-600 bg-emerald-50",
+        },
+        {
+          href: "/business",
+          name: "Business Solutions",
+          desc: "Commercial parking real-estate offerings",
+          icon: ShieldCheck,
+          color: "text-slate-600 bg-slate-50",
+        },
+        {
+          href: "/ecosystem",
+          name: "Multi-Location & ANPR",
+          desc: "CCTV feeds, camera streams & marketplace",
+          icon: Cpu,
+          color: "text-cyan-600 bg-cyan-50",
+        },
+      ];
+    }
+    return ALL_PLATFORM_APPS.filter((a) => a.roles.includes(authUser.role));
+  }, [authUser]);
 
   return (
     <header
@@ -134,7 +216,7 @@ export function Navbar() {
               onBlur={() => setTimeout(() => setAppsDropdownOpen(false), 200)}
               className="inline-flex items-center gap-1 rounded-full px-3.5 py-1.5 transition-colors hover:text-slate-900 hover:bg-slate-100/70"
             >
-              <span>Platform</span>
+              <span>{authUser ? (authUser.role === "DRIVER" ? "Driver Portal" : authUser.role === "OPERATOR" ? "Operator Portal" : "Platform Hub") : "Platform"}</span>
               <ChevronDown
                 className={`h-3.5 w-3.5 transition-transform duration-200 ${
                   appsDropdownOpen ? "rotate-180 text-blue-600" : ""
@@ -144,11 +226,14 @@ export function Navbar() {
 
             {appsDropdownOpen && (
               <div className="absolute top-full left-0 mt-2 w-80 rounded-2xl border border-slate-200/80 bg-white/95 p-2 shadow-xl backdrop-blur-xl z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Live Applications
+                <div className="flex items-center justify-between px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <span>Authorized Consoles</span>
+                  {authUser && (
+                    <span className="text-blue-600 font-bold">{authUser.role} BOUNDARY</span>
+                  )}
                 </div>
                 <div className="space-y-1">
-                  {PLATFORM_APPS.map((app) => {
+                  {visibleApps.map((app) => {
                     const Icon = app.icon;
                     return (
                       <Link
@@ -259,10 +344,10 @@ export function Navbar() {
 
           <div className="border-t border-slate-100 pt-3">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-3">
-              Platform Consoles
+              {authUser ? `${authUser.role} Consoles` : "Platform Consoles"}
             </div>
             <div className="grid grid-cols-1 gap-1">
-              {PLATFORM_APPS.map((app) => {
+              {visibleApps.map((app) => {
                 const Icon = app.icon;
                 return (
                   <Link

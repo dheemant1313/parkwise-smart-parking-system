@@ -25,6 +25,7 @@ import { InteractiveIndiaMap } from "@/components/driver/InteractiveIndiaMap";
 import { QrPassModal } from "@/components/driver/QrPassModal";
 import { Canvas3DSkeleton } from "@/components/ui/Skeleton";
 import { AIBookingAssistant } from "@/components/driver/AIBookingAssistant";
+import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
 
 const SmartParkingCanvas = dynamic(
   () =>
@@ -242,10 +243,14 @@ export default function DriverBookingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-surface-soft pb-20">
-      <DriverSubNav />
+    <ProtectedRouteGate
+      allowedRoles={["DRIVER", "ADMIN"]}
+      applicationName="Driver Mobility App"
+    >
+      <div className="min-h-screen bg-surface-soft pb-20">
+        <DriverSubNav />
 
-      <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8 space-y-8">
+        <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8 space-y-8">
         {/* 1. DRIVER HOMEPAGE HEADER & LOCATION SEARCH BAR */}
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-apple space-y-5">
           <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
@@ -960,5 +965,6 @@ export default function DriverBookingPage() {
         onClose={() => setModalBooking(null)}
       />
     </div>
+    </ProtectedRouteGate>
   );
 }
