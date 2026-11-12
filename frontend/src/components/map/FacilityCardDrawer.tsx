@@ -94,7 +94,7 @@ export function FacilityCardDrawer({
   const wazeUrl = `https://waze.com/ul?ll=${entLat},${entLng}&navigate=yes`;
 
   return (
-    <div className="absolute bottom-4 left-4 right-4 md:left-auto md:right-4 md:top-4 md:bottom-auto md:w-[420px] z-40 max-h-[85vh] overflow-y-auto rounded-3xl border border-slate-700/80 bg-slate-900/95 p-5 text-white shadow-2xl backdrop-blur-xl transition-all">
+    <div className="absolute bottom-4 left-4 right-4 md:left-auto md:right-4 md:top-20 md:bottom-auto md:w-[420px] z-30 max-h-[calc(100vh-210px)] overflow-y-auto rounded-3xl border border-slate-700/80 bg-slate-900/95 p-5 text-white shadow-2xl backdrop-blur-xl transition-all">
       {/* Header Bar */}
       <div className="flex items-start justify-between gap-3">
         <div>

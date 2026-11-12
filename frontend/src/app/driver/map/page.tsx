@@ -258,7 +258,12 @@ export default function DriverMapPage() {
                   sortBy={sortBy}
                   onSortByChange={setSortBy}
                   viewMode={viewMode}
-                  onViewModeChange={setViewMode}
+                  onViewModeChange={(mode) => {
+                    setViewMode(mode);
+                    if (mode === "list") {
+                      setSelectedFacility(null);
+                    }
+                  }}
                 />
               </div>
             </div>
