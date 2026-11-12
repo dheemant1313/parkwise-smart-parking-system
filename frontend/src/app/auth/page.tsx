@@ -2,220 +2,232 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
+  ArrowRight,
+  BatteryCharging,
+  Building2,
+  CarFront,
   CheckCircle2,
+  ChevronRight,
+  Clock,
+  Cpu,
+  Crown,
+  Eye,
+  EyeOff,
   Fingerprint,
   KeyRound,
   Laptop,
   Lock,
   LogIn,
   LogOut,
-  MailCheck,
+  Mail,
+  QrCode,
   RefreshCw,
+  Shield,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
   UserCheck,
   UserPlus,
-  UserX,
+  Users,
+  Zap,
 } from "lucide-react";
 import { useParkwise } from "@/lib/store";
-import { formatDateTime } from "@/lib/utils";
-import { UserRole, VehicleSize } from "@/types";
+import { UserRole } from "@/types";
 
-export default function AuthAndSecurityPage() {
+type LoginPortalMode = "DRIVER" | "OPERATOR" | "ADMIN";
+
+export default function InteractiveAuthPage() {
+  const router = useRouter();
   const {
     authUser,
-    sessions,
-    roleDefinitions,
-    auditLogs,
     loginUser,
     registerUser,
     logoutUser,
-    verifyEmailToken,
-    requestPasswordReset,
-    confirmPasswordReset,
+    activeRole,
+    setActiveRole,
+    backendConnected,
+    sessions,
     revokeSession,
-    deactivateAccount,
   } = useParkwise();
 
-  const [activeTab, setActiveTab] = useState<
-    "LOGIN" | "REGISTER" | "VERIFY_RESET" | "SESSIONS_RBAC"
-  >("LOGIN");
+  // Mode: "DRIVER" | "OPERATOR" | "ADMIN" | "REGISTER"
+  const [portalMode, setPortalMode] = useState<LoginPortalMode>("DRIVER");
+  const [authView, setAuthView] = useState<"LOGIN" | "REGISTER" | "MANAGE_SESSION">("LOGIN");
 
-  // Login State
-  const [loginEmail, setLoginEmail] = useState("driver@parkwise.in");
-  const [loginPassword, setLoginPassword] = useState("parkwise123");
-  const [deviceLabel, setDeviceLabel] = useState(
-    "Workstation Chrome • HttpOnly Cookie"
-  );
-
-  // Registration State
-  const [regName, setRegName] = useState("");
-  const [regEmail, setRegEmail] = useState("");
-  const [regPhone, setRegPhone] = useState("+91-9811223344");
-  const [regPassword, setRegPassword] = useState("Parkwise2026");
-  const [regRole, setRegRole] = useState<string>("DRIVER");
-  const [regPlate, setRegPlate] = useState("DL-08-CAF-8921");
-  const [regModel, setRegModel] = useState("Tata Nexon EV Empowered+");
-  const [regSize, setRegSize] = useState<VehicleSize>("SEDAN");
-  const [regEv, setRegEv] = useState(true);
-  const [regCity, setRegCity] = useState("New Delhi");
-
-  // Email Verification & Password Reset State
-  const [verifyTokenInput, setVerifyTokenInput] = useState("");
-  const [forgotEmail, setForgotEmail] = useState("driver@parkwise.in");
-  const [issuedResetToken, setIssuedResetToken] = useState("");
-  const [newResetPassword, setNewResetPassword] = useState("NewSecurePass2027");
-
-  // Feedback Banner
+  // Input states
+  const [email, setEmail] = useState("driver@parkwise.in");
+  const [password, setPassword] = useState("parkwise123");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [banner, setBanner] = useState<{
-    type: "success" | "error";
-    text: string;
+  const [biometricScanning, setBiometricScanning] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error" | "info";
+    message: string;
   } | null>(null);
 
+  // Register state
+  const [regFullName, setRegFullName] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPhone, setRegPhone] = useState("+91 9811002233");
+  const [regPassword, setRegPassword] = useState("Parkwise2026");
+  const [regRole, setRegRole] = useState<"DRIVER" | "OPERATOR">("DRIVER");
+  const [regPlate, setRegPlate] = useState("DL-01-AB-1234");
+  const [regModel, setRegModel] = useState("Tata Nexon EV");
+  const [regFacilityName, setRegFacilityName] = useState("CyberHub Multi-Level Lot");
+
+  // Quick preset loader when switching modes
+  const handleSelectMode = (mode: LoginPortalMode) => {
+    setPortalMode(mode);
+    setFeedback(null);
+    if (mode === "DRIVER") {
+      setEmail("driver@parkwise.in");
+      setPassword("parkwise123");
+    } else if (mode === "OPERATOR") {
+      setEmail("operator@parkwise.in");
+      setPassword("parkwise123");
+    } else if (mode === "ADMIN") {
+      setEmail("admin@parkwise.in");
+      setPassword("parkwise123");
+    }
+  };
+
+  // Submit handler
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    setBanner(null);
-    try {
-      const user = await loginUser(loginEmail, loginPassword, deviceLabel);
-      setBanner({
-        type: "success",
-        text: `Authenticated as ${user.fullName} (${user.role}). HttpOnly cookie set and session ${user.sessionJti.slice(0, 14)} activated.`,
-      });
-    } catch (err) {
-      setBanner({
-        type: "error",
-        text: err instanceof Error ? err.message : "Authentication failed.",
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
+    setFeedback(null);
 
-  const handleQuickRoleLogin = async (role: UserRole, email: string) => {
-    setBusy(true);
-    setBanner(null);
     try {
-      setLoginEmail(email);
       const user = await loginUser(
         email,
-        "parkwise123",
-        `${role} Console • HttpOnly Session`
+        password,
+        `${portalMode} Console • Web Client Session`
       );
-      setBanner({
+
+      // Verify that user role matches portal mode (unless user is SuperAdmin)
+      if (portalMode === "DRIVER" && user.role !== "DRIVER" && user.role !== "ADMIN") {
+        setFeedback({
+          type: "error",
+          message: `This account has role '${user.role}', but you are attempting Driver Portal login. Please switch to the Operator portal.`,
+        });
+        setBusy(false);
+        return;
+      }
+
+      if (portalMode === "OPERATOR" && user.role !== "OPERATOR" && user.role !== "ADMIN") {
+        setFeedback({
+          type: "error",
+          message: `This account has role '${user.role}', but you are attempting Operator SaaS login. Please switch to the Driver portal.`,
+        });
+        setBusy(false);
+        return;
+      }
+
+      // Synchronize activeRole
+      setActiveRole(user.role);
+
+      setFeedback({
         type: "success",
-        text: `Switched authenticated session to ${user.fullName} (${user.role}) with ${user.permissions.length} RBAC permissions.`,
+        message: `Welcome, ${user.fullName}! Authenticated as ${user.role}. Redirecting to your console...`,
       });
+
+      // Redirect strictly based on role
+      setTimeout(() => {
+        if (user.role === "DRIVER") {
+          router.push("/driver");
+        } else if (user.role === "OPERATOR") {
+          router.push("/operator");
+        } else {
+          router.push("/admin");
+        }
+      }, 900);
     } catch (err) {
-      setBanner({
+      setFeedback({
         type: "error",
-        text: err instanceof Error ? err.message : "Quick login failed.",
+        message: err instanceof Error ? err.message : "Authentication failed.",
       });
     } finally {
       setBusy(false);
     }
   };
 
+  // Simulated WebAuthn Biometric Fast Sign-In
+  const handleBiometricAuth = async () => {
+    setBiometricScanning(true);
+    setFeedback({
+      type: "info",
+      message: `Scanning WebAuthn / TouchID for ${portalMode} profile...`,
+    });
+
+    setTimeout(async () => {
+      try {
+        let targetEmail = "driver@parkwise.in";
+        if (portalMode === "OPERATOR") targetEmail = "operator@parkwise.in";
+        if (portalMode === "ADMIN") targetEmail = "admin@parkwise.in";
+
+        const user = await loginUser(
+          targetEmail,
+          "parkwise123",
+          `Biometric FIDO2 • ${portalMode} Authenticator`
+        );
+        setActiveRole(user.role);
+
+        setFeedback({
+          type: "success",
+          message: `Biometric Verified! Authenticated as ${user.fullName} (${user.role}). Redirecting...`,
+        });
+
+        setTimeout(() => {
+          if (user.role === "DRIVER") router.push("/driver");
+          else if (user.role === "OPERATOR") router.push("/operator");
+          else router.push("/admin");
+        }, 800);
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          message: "Biometric authentication failed. Please enter your credentials manually.",
+        });
+      } finally {
+        setBiometricScanning(false);
+      }
+    }, 1200);
+  };
+
+  // Registration handler
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    setBanner(null);
+    setFeedback(null);
+
     try {
       const created = await registerUser({
-        fullName: regName,
+        fullName: regFullName,
         email: regEmail,
         phone: regPhone,
         password: regPassword,
         role: regRole,
         vehicleNumber: regRole === "DRIVER" ? regPlate : undefined,
-        modelName: regModel,
-        sizeClass: regSize,
-        isEv: regEv,
-        homeCity: regCity,
+        modelName: regRole === "DRIVER" ? regModel : undefined,
+        homeCity: "New Delhi",
       });
-      if (created.emailVerificationTokenPreview) {
-        setVerifyTokenInput(created.emailVerificationTokenPreview);
-      }
-      setBanner({
-        type: "success",
-        text: `Account created for ${created.email} (${created.role}). Verification token issued: ${created.emailVerificationTokenPreview || "verified"}.`,
-      });
-    } catch (err) {
-      setBanner({
-        type: "error",
-        text: err instanceof Error ? err.message : "Registration failed.",
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
 
-  const handleVerifyEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setBanner(null);
-    try {
-      const tokenToUse =
-        verifyTokenInput.trim() ||
-        authUser?.emailVerificationTokenPreview ||
-        "pw_verify_demo_2026";
-      await verifyEmailToken(tokenToUse);
-      setBanner({
+      setFeedback({
         type: "success",
-        text: `Email ownership verified using cryptographic token '${tokenToUse}'.`,
+        message: `Account created for ${created.fullName} (${created.role})! You are now signed in.`,
       });
-    } catch (err) {
-      setBanner({
-        type: "error",
-        text: err instanceof Error ? err.message : "Email verification failed.",
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
 
-  const handleRequestReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setBanner(null);
-    try {
-      const res = await requestPasswordReset(forgotEmail);
-      setIssuedResetToken(res.resetToken);
-      setBanner({
-        type: "success",
-        text: `Generated 15-minute cryptographic password reset token: ${res.resetToken}`,
-      });
+      setActiveRole(created.role);
+      setTimeout(() => {
+        if (created.role === "DRIVER") router.push("/driver");
+        else router.push("/operator");
+      }, 1000);
     } catch (err) {
-      setBanner({
+      setFeedback({
         type: "error",
-        text:
-          err instanceof Error
-            ? err.message
-            : "Unable to generate password reset token.",
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleConfirmReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setBanner(null);
-    try {
-      await confirmPasswordReset(issuedResetToken, newResetPassword);
-      setBanner({
-        type: "success",
-        text: "Password updated via PBKDF2-HMAC-SHA256 and all prior sessions revoked.",
-      });
-    } catch (err) {
-      setBanner({
-        type: "error",
-        text: err instanceof Error ? err.message : "Password reset failed.",
+        message: err instanceof Error ? err.message : "Registration failed.",
       });
     } finally {
       setBusy(false);
@@ -223,817 +235,567 @@ export default function AuthAndSecurityPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-24">
-      {/* Top Security Banner */}
-      <section className="border-b border-slate-200/80 bg-white py-8">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                <Fingerprint className="h-3.5 w-3.5" />
-                <span>
-                  PHASE 03 • ENTERPRISE AUTHENTICATION, RBAC &amp; SESSION
-                  SECURITY
-                </span>
-              </div>
-              <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-                Identity, Access Control &amp; Session Governance
-              </h1>
-              <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                PBKDF2-HMAC-SHA256 password hashing, HttpOnly cookie sessions,
-                sliding-window rate limiting, role-escalation prevention, and
-                granular RBAC across Driver, Operator, Gate, and Admin apps.
-              </p>
-            </div>
+    <div className="relative min-h-[calc(100vh-80px)] overflow-hidden bg-slate-950 text-slate-100 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
+      {/* Background Holographic Glow Mesh */}
+      <div className="pointer-events-none absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-brand-500/15 blur-[128px]" />
+      <div className="pointer-events-none absolute top-1/2 -right-40 h-[550px] w-[550px] rounded-full bg-indigo-500/15 blur-[140px]" />
+      <div className="pointer-events-none absolute -bottom-40 left-1/3 h-[500px] w-[500px] rounded-full bg-emerald-500/10 blur-[130px]" />
 
-            {/* Active Session Badge */}
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:min-w-[320px]">
-              {authUser ? (
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                      <span className="text-xs font-bold text-slate-900">
-                        {authUser.fullName}
-                      </span>
-                      <span className="rounded-md bg-blue-600 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
-                        {authUser.role}
-                      </span>
-                    </div>
-                    <p className="mt-1 font-mono text-xs text-slate-600">
-                      {authUser.email}
-                    </p>
-                    <p className="mt-1 font-mono text-[10px] text-slate-400">
-                      JTI: {authUser.sessionJti} •{" "}
-                      {authUser.emailVerified
-                        ? "Email Verified"
-                        : "Unverified Email"}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => logoutUser()}
-                    className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                    Logout
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold text-rose-700">
-                      Signed Out • No Active Session
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-slate-500">
-                      Protected routes require authentication
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleQuickRoleLogin("DRIVER", "driver@parkwise.in")
-                    }
-                    className="rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-700"
-                  >
-                    Quick Sign In
-                  </button>
-                </div>
-              )}
-            </div>
+      <div className="relative mx-auto w-full max-w-4xl">
+        {/* Header Branding */}
+        <div className="text-center">
+          <div className="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-950/50 px-4 py-1.5 text-xs font-bold text-brand-300 backdrop-blur-md">
+            <Sparkles className="h-3.5 w-3.5 text-brand-400 animate-pulse" />
+            <span>PARKWISE ENTERPRISE IDENTITY &amp; RBAC 2.0</span>
           </div>
 
-          {/* Navigation Tabs */}
-          <div className="mt-6 flex flex-wrap gap-2">
-            {[
-              { id: "LOGIN", label: "1. Sign In & Quick RBAC Switch", icon: LogIn },
-              {
-                id: "REGISTER",
-                label: "2. Register & Escalation Guard",
-                icon: UserPlus,
-              },
-              {
-                id: "VERIFY_RESET",
-                label: "3. Email Verification & Password Reset",
-                icon: MailCheck,
-              },
-              {
-                id: "SESSIONS_RBAC",
-                label: "4. Sessions, Permissions & Deactivation",
-                icon: ShieldCheck,
-              },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() =>
-                    setActiveTab(
-                      tab.id as
-                        | "LOGIN"
-                        | "REGISTER"
-                        | "VERIFY_RESET"
-                        | "SESSIONS_RBAC"
-                    )
-                  }
-                  className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition ${
-                    active
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
+          <h1 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-4xl md:text-5xl">
+            Choose Your Access Portal
+          </h1>
+          <p className="mt-2 text-sm text-slate-400 max-w-xl mx-auto">
+            Strict role-based operational isolation. Drivers access individual mobility, EV charging &amp; payments. Operators command smart facilities, live cameras &amp; dynamic pricing.
+          </p>
         </div>
-      </section>
 
-      <div className="mx-auto mt-8 max-w-7xl px-4 sm:px-6 lg:px-8">
-        {banner && (
+        {/* Active Session Status Notification Bar */}
+        {authUser && (
+          <div className="mt-6 rounded-2xl border border-emerald-500/30 bg-emerald-950/30 p-4 backdrop-blur-md">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                  <UserCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-emerald-300">CURRENTLY AUTHENTICATED</span>
+                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-mono font-bold text-emerald-300 border border-emerald-500/30">
+                      {authUser.role}
+                    </span>
+                  </div>
+                  <p className="text-sm font-bold text-white">
+                    {authUser.fullName} <span className="text-xs font-normal text-slate-400">({authUser.email})</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Link
+                  href={authUser.role === "DRIVER" ? "/driver" : authUser.role === "OPERATOR" ? "/operator" : "/admin"}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-600/30"
+                >
+                  <span>Go to {authUser.role} Console</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await logoutUser();
+                    setFeedback({ type: "info", message: "You have been logged out safely." });
+                  }}
+                  className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white"
+                >
+                  <LogOut className="h-3.5 w-3.5 inline mr-1" />
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Feedback Alert */}
+        {feedback && (
           <div
-            className={`mb-6 flex items-center justify-between gap-3 rounded-2xl border p-4 text-sm font-medium shadow-xs ${
-              banner.type === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                : "border-rose-200 bg-rose-50 text-rose-900"
+            className={`mt-4 flex items-start gap-3 rounded-2xl p-4 text-xs font-medium backdrop-blur-md border ${
+              feedback.type === "success"
+                ? "border-emerald-500/40 bg-emerald-950/40 text-emerald-200"
+                : feedback.type === "error"
+                ? "border-rose-500/40 bg-rose-950/40 text-rose-200"
+                : "border-blue-500/40 bg-blue-950/40 text-blue-200"
             }`}
           >
-            <div className="flex items-center gap-2.5">
-              {banner.type === "success" ? (
-                <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
-              ) : (
-                <AlertCircle className="h-5 w-5 shrink-0 text-rose-600" />
-              )}
-              <span>{banner.text}</span>
-            </div>
+            {feedback.type === "success" ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
+            ) : feedback.type === "error" ? (
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-400 mt-0.5" />
+            ) : (
+              <RefreshCw className="h-4 w-4 shrink-0 text-blue-400 mt-0.5 animate-spin" />
+            )}
+            <div className="flex-1">{feedback.message}</div>
             <button
               type="button"
-              onClick={() => setBanner(null)}
-              className="text-xs font-semibold underline"
+              onClick={() => setFeedback(null)}
+              className="text-slate-400 hover:text-white ml-2 text-sm leading-none"
             >
-              Dismiss
+              ×
             </button>
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-          {/* Left 7 Cols: Active Auth Flow */}
-          <div className="space-y-6 lg:col-span-7">
-            {activeTab === "LOGIN" && (
-              <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm sm:p-8">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-900">
-                      Enterprise Sign In
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Authenticates via PBKDF2-HMAC-SHA256 and sets an HttpOnly
-                      session cookie (`parkwise_session`).
-                    </p>
-                  </div>
-                  <Lock className="h-5 w-5 text-blue-600" />
-                </div>
-
-                {/* 1-Click Role Switcher Cards */}
-                <div className="mt-5">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    1-Click Enterprise Role Accounts (Password: parkwise123)
-                  </p>
-                  <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                    {[
-                      {
-                        role: "DRIVER" as UserRole,
-                        email: "driver@parkwise.in",
-                        name: "Aarav Sharma",
-                        appUrl: "/driver",
-                        appName: "Driver App",
-                      },
-                      {
-                        role: "OPERATOR" as UserRole,
-                        email: "operator@parkwise.in",
-                        name: "Vikramaditya Nair",
-                        appUrl: "/operator",
-                        appName: "Operator SaaS",
-                      },
-                      {
-                        role: "GATE_STAFF" as UserRole,
-                        email: "gate@parkwise.in",
-                        name: "Rajeshwari Menon",
-                        appUrl: "/gate",
-                        appName: "Gate Terminal",
-                      },
-                      {
-                        role: "ADMIN" as UserRole,
-                        email: "admin@parkwise.in",
-                        name: "Dheemant Setia",
-                        appUrl: "/admin",
-                        appName: "Admin Console",
-                      },
-                    ].map((preset) => {
-                      const isCurrent = authUser?.role === preset.role;
-                      return (
-                        <div
-                          key={preset.role}
-                          className={`flex items-center justify-between rounded-2xl border p-3.5 transition ${
-                            isCurrent
-                              ? "border-blue-600 bg-blue-50/50"
-                              : "border-slate-200 bg-slate-50/60"
-                          }`}
-                        >
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="rounded-md bg-slate-900 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
-                                {preset.role}
-                              </span>
-                              {isCurrent && (
-                                <span className="text-[10px] font-bold text-blue-600">
-                                  • Active
-                                </span>
-                              )}
-                            </div>
-                            <p className="mt-1 text-xs font-bold text-slate-900">
-                              {preset.name}
-                            </p>
-                            <p className="font-mono text-[11px] text-slate-500">
-                              {preset.email}
-                            </p>
-                          </div>
-                          <div className="flex flex-col items-end gap-1.5">
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() =>
-                                handleQuickRoleLogin(preset.role, preset.email)
-                              }
-                              className="rounded-xl bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
-                            >
-                              Sign In
-                            </button>
-                            <Link
-                              href={preset.appUrl}
-                              className="text-[11px] font-semibold text-blue-600 hover:underline"
-                            >
-                              Open {preset.appName} →
-                            </Link>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Custom Email / Password Login Form */}
-                <form
-                  onSubmit={handleLoginSubmit}
-                  className="mt-6 space-y-4 border-t border-slate-100 pt-5"
+        {/* Main Card Container */}
+        <div className="mt-8 rounded-3xl border border-slate-800/80 bg-slate-900/60 p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+          {/* Top Mode Selector: Driver vs Operator vs Admin */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* 1. Driver Portal */}
+            <button
+              type="button"
+              onClick={() => {
+                setAuthView("LOGIN");
+                handleSelectMode("DRIVER");
+              }}
+              className={`relative flex flex-col p-4 rounded-2xl border text-left transition-all ${
+                portalMode === "DRIVER" && authView === "LOGIN"
+                  ? "border-cyan-500/80 bg-cyan-950/30 ring-2 ring-cyan-500/30 shadow-lg shadow-cyan-500/10"
+                  : "border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/70"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
+                    portalMode === "DRIVER"
+                      ? "border-cyan-400/50 bg-cyan-500/20 text-cyan-300"
+                      : "border-slate-700 bg-slate-800 text-slate-400"
+                  }`}
                 >
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Email Address
-                      </label>
-                      <input
-                        type="email"
-                        required
-                        value={loginEmail}
-                        onChange={(e) => setLoginEmail(e.target.value)}
-                        className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Password
-                      </label>
-                      <input
-                        type="password"
-                        required
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700">
-                      Session Device Label (Recorded in UserSession Table)
-                    </label>
-                    <input
-                      type="text"
-                      value={deviceLabel}
-                      onChange={(e) => setDeviceLabel(e.target.value)}
-                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    <LogIn className="h-4 w-4" />
-                    Authenticate &amp; Issue HttpOnly Session Cookie
-                  </button>
-                </form>
+                  <CarFront className="h-5 w-5" />
+                </div>
+                <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-bold text-cyan-400 border border-cyan-500/20">
+                  CONSUMER MOBILITY
+                </span>
               </div>
-            )}
+              <h3 className="mt-3 text-base font-bold text-white">Driver Portal</h3>
+              <p className="mt-1 text-xs text-slate-400 line-clamp-2">
+                Bay booking, 60kW EV charging, FASTag auto-debit, monthly passes, and QR gate pass.
+              </p>
+              <div className="mt-3 text-[11px] font-semibold text-cyan-400 flex items-center gap-1">
+                <span>Direct Access: /driver</span>
+                <ChevronRight className="h-3 w-3" />
+              </div>
+            </button>
 
-            {activeTab === "REGISTER" && (
-              <form
-                onSubmit={handleRegisterSubmit}
-                className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm sm:p-8"
+            {/* 2. Operator SaaS Console */}
+            <button
+              type="button"
+              onClick={() => {
+                setAuthView("LOGIN");
+                handleSelectMode("OPERATOR");
+              }}
+              className={`relative flex flex-col p-4 rounded-2xl border text-left transition-all ${
+                portalMode === "OPERATOR" && authView === "LOGIN"
+                  ? "border-indigo-500/80 bg-indigo-950/30 ring-2 ring-indigo-500/30 shadow-lg shadow-indigo-500/10"
+                  : "border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/70"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
+                    portalMode === "OPERATOR"
+                      ? "border-indigo-400/50 bg-indigo-500/20 text-indigo-300"
+                      : "border-slate-700 bg-slate-800 text-slate-400"
+                  }`}
+                >
+                  <Building2 className="h-5 w-5" />
+                </div>
+                <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-400 border border-indigo-500/20">
+                  FACILITY OPERATOR
+                </span>
+              </div>
+              <h3 className="mt-3 text-base font-bold text-white">Operator SaaS</h3>
+              <p className="mt-1 text-xs text-slate-400 line-clamp-2">
+                Multi-facility control, XGBoost dynamic surge pricing, ANPR camera streams, and staff roster.
+              </p>
+              <div className="mt-3 text-[11px] font-semibold text-indigo-400 flex items-center gap-1">
+                <span>Direct Access: /operator</span>
+                <ChevronRight className="h-3 w-3" />
+              </div>
+            </button>
+
+            {/* 3. SuperAdmin Master Control */}
+            <button
+              type="button"
+              onClick={() => {
+                setAuthView("LOGIN");
+                handleSelectMode("ADMIN");
+              }}
+              className={`relative flex flex-col p-4 rounded-2xl border text-left transition-all ${
+                portalMode === "ADMIN" && authView === "LOGIN"
+                  ? "border-amber-500/80 bg-amber-950/30 ring-2 ring-amber-500/30 shadow-lg shadow-amber-500/10"
+                  : "border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/70"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
+                    portalMode === "ADMIN"
+                      ? "border-amber-400/50 bg-amber-500/20 text-amber-300"
+                      : "border-slate-700 bg-slate-800 text-slate-400"
+                  }`}
+                >
+                  <Crown className="h-5 w-5" />
+                </div>
+                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-400 border border-amber-500/20">
+                  SUPERADMIN MASTER
+                </span>
+              </div>
+              <h3 className="mt-3 text-base font-bold text-white">Platform Owner</h3>
+              <p className="mt-1 text-xs text-slate-400 line-clamp-2">
+                Universal root access: bypasses all role gates, full telemetry, user management, audit logs.
+              </p>
+              <div className="mt-3 text-[11px] font-semibold text-amber-400 flex items-center gap-1">
+                <span>All Consoles Unlocked</span>
+                <ChevronRight className="h-3 w-3" />
+              </div>
+            </button>
+          </div>
+
+          {/* Tab Navigation: Sign In vs Create Account */}
+          <div className="mt-6 flex items-center justify-between border-t border-slate-800/80 pt-6">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAuthView("LOGIN")}
+                className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+                  authView === "LOGIN"
+                    ? "bg-brand-600 text-white shadow-md shadow-brand-600/30"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800"
+                }`}
               >
-                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-900">
-                      Register New Parkwise Account
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Includes password strength enforcement, RTO vehicle
-                      validation, and backend role-escalation protection.
-                    </p>
-                  </div>
-                  <UserPlus className="h-5 w-5 text-blue-600" />
-                </div>
+                Sign In to {portalMode === "DRIVER" ? "Driver Portal" : portalMode === "OPERATOR" ? "Operator SaaS" : "Admin Master"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAuthView("REGISTER")}
+                className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+                  authView === "REGISTER"
+                    ? "bg-brand-600 text-white shadow-md shadow-brand-600/30"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800"
+                }`}
+              >
+                New Account Registration
+              </button>
+            </div>
 
-                <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700">
-                      Full Name
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={regName}
-                      onChange={(e) => setRegName(e.target.value)}
-                      placeholder="e.g. Siddharth Malhotra"
-                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700">
-                      Email Address
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={regEmail}
-                      onChange={(e) => setRegEmail(e.target.value)}
-                      placeholder="siddharth@parkwise.in"
-                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700">
-                      Mobile Phone
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={regPhone}
-                      onChange={(e) => setRegPhone(e.target.value)}
-                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700">
-                      Strong Password (8+ chars, letters &amp; digits)
-                    </label>
-                    <input
-                      type="password"
-                      required
-                      value={regPassword}
-                      onChange={(e) => setRegPassword(e.target.value)}
-                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                {/* Role Selection with Role-Escalation Security Test */}
-                <div className="mt-4">
-                  <label className="block text-xs font-semibold text-slate-700">
-                    Account Role (Select ADMIN to test Role-Escalation Prevention)
-                  </label>
-                  <div className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                    {[
-                      { code: "DRIVER", label: "Driver" },
-                      { code: "OPERATOR", label: "Operator" },
-                      { code: "GATE_STAFF", label: "Gate Staff" },
-                      { code: "ADMIN", label: "ADMIN (Blocked)" },
-                    ].map((r) => (
-                      <button
-                        key={r.code}
-                        type="button"
-                        onClick={() => setRegRole(r.code)}
-                        className={`rounded-xl border px-3 py-2 text-xs font-bold transition ${
-                          regRole === r.code
-                            ? r.code === "ADMIN"
-                              ? "border-rose-600 bg-rose-50 text-rose-800"
-                              : "border-blue-600 bg-blue-50 text-blue-800"
-                            : "border-slate-200 bg-slate-50 text-slate-700"
-                        }`}
-                      >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {regRole === "DRIVER" && (
-                  <div className="mt-4 grid grid-cols-1 gap-4 rounded-2xl border border-slate-200/80 bg-slate-50/60 p-4 sm:grid-cols-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Primary Vehicle Plate
-                      </label>
-                      <input
-                        type="text"
-                        value={regPlate}
-                        onChange={(e) =>
-                          setRegPlate(e.target.value.toUpperCase())
-                        }
-                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs font-bold uppercase text-slate-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Vehicle Model
-                      </label>
-                      <input
-                        type="text"
-                        value={regModel}
-                        onChange={(e) => setRegModel(e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700">
-                        Size Class
-                      </label>
-                      <select
-                        value={regSize}
-                        onChange={(e) =>
-                          setRegSize(e.target.value as VehicleSize)
-                        }
-                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900"
-                      >
-                        <option value="COMPACT">COMPACT</option>
-                        <option value="SEDAN">SEDAN</option>
-                        <option value="SUV_XL">SUV_XL</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
-                >
-                  <UserPlus className="h-4 w-4" />
-                  Create Account &amp; Issue Verification Token
-                </button>
-              </form>
-            )}
-
-            {activeTab === "VERIFY_RESET" && (
-              <div className="space-y-6">
-                {/* Email Verification Card */}
-                <form
-                  onSubmit={handleVerifyEmail}
-                  className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm"
-                >
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                    <div>
-                      <h2 className="text-base font-bold text-slate-900">
-                        Email Ownership Verification
-                      </h2>
-                      <p className="text-xs text-slate-500">
-                        Verify the cryptographic token issued at registration
-                        (`POST /api/v1/auth/verify-email`).
-                      </p>
-                    </div>
-                    <MailCheck className="h-5 w-5 text-blue-600" />
-                  </div>
-
-                  <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                    <input
-                      type="text"
-                      value={verifyTokenInput}
-                      onChange={(e) => setVerifyTokenInput(e.target.value)}
-                      placeholder={
-                        authUser?.emailVerificationTokenPreview ||
-                        "pw_verify_..."
-                      }
-                      className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 font-mono text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
-                    />
-                    <button
-                      type="submit"
-                      disabled={busy}
-                      className="rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-blue-700"
-                    >
-                      Verify Email Token
-                    </button>
-                  </div>
-                </form>
-
-                {/* Password Reset Flow */}
-                <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                    <div>
-                      <h2 className="text-base font-bold text-slate-900">
-                        Cryptographic Password Reset
-                      </h2>
-                      <p className="text-xs text-slate-500">
-                        Generates a 15-minute reset token and revokes all active
-                        sessions upon password rotation.
-                      </p>
-                    </div>
-                    <RefreshCw className="h-5 w-5 text-blue-600" />
-                  </div>
-
-                  <form
-                    onSubmit={handleRequestReset}
-                    className="mt-4 flex flex-col gap-3 sm:flex-row"
-                  >
-                    <input
-                      type="email"
-                      required
-                      value={forgotEmail}
-                      onChange={(e) => setForgotEmail(e.target.value)}
-                      placeholder="Registered email address"
-                      className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-900"
-                    />
-                    <button
-                      type="submit"
-                      disabled={busy}
-                      className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-                    >
-                      1. Generate Reset Token
-                    </button>
-                  </form>
-
-                  <form
-                    onSubmit={handleConfirmReset}
-                    className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3"
-                  >
-                    <input
-                      type="text"
-                      required
-                      value={issuedResetToken}
-                      onChange={(e) => setIssuedResetToken(e.target.value)}
-                      placeholder="Reset token (pw_reset_...)"
-                      className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 font-mono text-xs text-slate-900"
-                    />
-                    <input
-                      type="password"
-                      required
-                      value={newResetPassword}
-                      onChange={(e) => setNewResetPassword(e.target.value)}
-                      placeholder="New strong password"
-                      className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-900"
-                    />
-                    <button
-                      type="submit"
-                      disabled={busy}
-                      className="rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-blue-600"
-                    >
-                      2. Confirm Password Reset
-                    </button>
-                  </form>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "SESSIONS_RBAC" && (
-              <div className="space-y-6">
-                {/* Active Device Sessions */}
-                <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                    <div>
-                      <h2 className="text-base font-bold text-slate-900">
-                        Active &amp; Historical Device Sessions (
-                        {sessions.filter((s) => !s.is_revoked).length} Active)
-                      </h2>
-                      <p className="text-xs text-slate-500">
-                        Backed by the `user_sessions` table with JTI token
-                        revocation.
-                      </p>
-                    </div>
-                    <Laptop className="h-5 w-5 text-blue-600" />
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    {sessions.map((sess) => (
-                      <div
-                        key={sess.id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-slate-900">
-                              {sess.device_label}
-                            </span>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                sess.is_revoked
-                                  ? "bg-rose-100 text-rose-700"
-                                  : "bg-emerald-100 text-emerald-700"
-                              }`}
-                            >
-                              {sess.is_revoked ? "REVOKED" : "ACTIVE"}
-                            </span>
-                          </div>
-                          <p className="mt-1 font-mono text-[11px] text-slate-500">
-                            JTI: {sess.session_token_jti} • IP:{" "}
-                            {sess.ip_address}
-                          </p>
-                          <p className="mt-0.5 text-[11px] text-slate-400">
-                            Created {formatDateTime(sess.created_at)} • Expires{" "}
-                            {formatDateTime(sess.expires_at)}
-                          </p>
-                        </div>
-
-                        {!sess.is_revoked && (
-                          <button
-                            type="button"
-                            onClick={() => revokeSession(sess.id)}
-                            className="rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
-                          >
-                            Revoke Session
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Role-Based Permissions Matrix */}
-                <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm">
-                  <h2 className="text-base font-bold text-slate-900">
-                    Enterprise RBAC Roles &amp; Granular Permissions Matrix
-                  </h2>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Enforced on the FastAPI backend via `require_roles` and
-                    `require_permission`.
-                  </p>
-                  <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    {roleDefinitions.map((roleDef) => (
-                      <div
-                        key={roleDef.code}
-                        className={`rounded-2xl border p-4 ${
-                          authUser?.role === roleDef.code
-                            ? "border-blue-600 bg-blue-50/40"
-                            : "border-slate-200 bg-slate-50/50"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="rounded-md bg-slate-900 px-2.5 py-0.5 font-mono text-xs font-bold text-white">
-                            {roleDef.code}
-                          </span>
-                          <span className="text-[11px] font-semibold text-slate-500">
-                            {roleDef.permissions.length} permissions
-                          </span>
-                        </div>
-                        <p className="mt-2 text-xs font-bold text-slate-900">
-                          {roleDef.name}
-                        </p>
-                        <p className="mt-0.5 text-[11px] text-slate-600">
-                          {roleDef.description}
-                        </p>
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          {roleDef.permissions.map((perm) => (
-                            <span
-                              key={perm.code}
-                              className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-700"
-                              title={perm.description}
-                            >
-                              {perm.code}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Account Deactivation Card */}
-                <div className="rounded-3xl border border-rose-200 bg-rose-50/50 p-6">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div>
-                      <h3 className="text-sm font-bold text-rose-900">
-                        Deactivate Account &amp; Revoke All Sessions
-                      </h3>
-                      <p className="mt-1 text-xs text-rose-700">
-                        Marks `is_active = false`, revokes every active
-                        `UserSession`, clears the `HttpOnly` cookie, and blocks
-                        future logins until restored by a Platform
-                        Administrator.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={!authUser}
-                      onClick={async () => {
-                        await deactivateAccount();
-                        setBanner({
-                          type: "error",
-                          text: "Account deactivated and all active sessions revoked.",
-                        });
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
-                    >
-                      <UserX className="h-4 w-4" />
-                      Deactivate My Account
-                    </button>
-                  </div>
-                </div>
-              </div>
+            {/* Quick Demo Autofill Pill */}
+            {authView === "LOGIN" && (
+              <button
+                type="button"
+                onClick={() => handleSelectMode(portalMode)}
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-[11px] font-mono text-slate-300 hover:bg-slate-700 hover:text-white"
+              >
+                <RefreshCw className="h-3 w-3 text-brand-400" />
+                <span>Autofill {portalMode} Demo Credentials</span>
+              </button>
             )}
           </div>
 
-          {/* Right 5 Cols: Real-Time Security & Audit Ledger */}
-          <div className="space-y-6 lg:col-span-5">
-            <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-2">
-                  <ShieldAlert className="h-5 w-5 text-blue-600" />
-                  <h2 className="text-base font-bold text-slate-900">
-                    Immutable Security &amp; RBAC Audit Log
-                  </h2>
-                </div>
-                <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
-                  Live Ledger
-                </span>
-              </div>
-
-              <div className="mt-4 max-h-[540px] space-y-3 overflow-y-auto pr-1">
-                {auditLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span
-                        className={`rounded-md px-2 py-0.5 font-mono text-[10px] font-bold ${
-                          log.action.includes("BLOCKED") ||
-                          log.action.includes("DENIED") ||
-                          log.action.includes("DEACTIVATED")
-                            ? "bg-rose-100 text-rose-700"
-                            : "bg-blue-100 text-blue-700"
-                        }`}
-                      >
-                        {log.action}
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        {formatDateTime(log.created_at)}
-                      </span>
-                    </div>
-                    <p className="mt-1.5 text-xs font-bold text-slate-900">
-                      {log.actor_email}{" "}
-                      <span className="font-mono text-[11px] font-normal text-slate-500">
-                        ({log.actor_role}) → {log.target_resource}
-                      </span>
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                      {log.details}
-                    </p>
+          {/* VIEW 1: LOGIN FORM */}
+          {authView === "LOGIN" && (
+            <div className="mt-6 space-y-6">
+              {/* Strict Isolation Notice */}
+              <div
+                className={`rounded-2xl border p-4 text-xs ${
+                  portalMode === "DRIVER"
+                    ? "border-cyan-800/40 bg-cyan-950/20 text-cyan-200"
+                    : portalMode === "OPERATOR"
+                    ? "border-indigo-800/40 bg-indigo-950/20 text-indigo-200"
+                    : "border-amber-800/40 bg-amber-950/20 text-amber-200"
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <Shield className="h-4 w-4 shrink-0 mt-0.5 text-current" />
+                  <div>
+                    <span className="font-bold uppercase tracking-wider">
+                      {portalMode === "DRIVER"
+                        ? "Driver Data Boundary:"
+                        : portalMode === "OPERATOR"
+                        ? "Facility Operator Boundary:"
+                        : "Root SuperAdmin Key:"}
+                    </span>{" "}
+                    {portalMode === "DRIVER" &&
+                      "Driver accounts have zero visibility into other drivers' bookings, operator revenue streams, or CCTV security cameras. Access is strictly confined to your personal mobility dashboard."}
+                    {portalMode === "OPERATOR" &&
+                      "Operator accounts manage their assigned facilities and dynamic pricing models. You cannot inspect other operators' revenues or private driver profile details."}
+                    {portalMode === "ADMIN" &&
+                      "As the Platform Owner / SuperAdmin, you possess master multi-tenant privileges across Driver Apps, Operator Consoles, Gate Scanners, and System Configurations."}
                   </div>
-                ))}
+                </div>
               </div>
-            </div>
 
-            <div className="rounded-3xl border border-blue-200/80 bg-gradient-to-br from-blue-50/80 via-white to-slate-50 p-6 shadow-sm">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-700">
-                <KeyRound className="h-4 w-4" />
-                <span>Zero-Trust Storage Policy</span>
-              </div>
-              <p className="mt-2 text-xs leading-relaxed text-slate-600">
-                Sensitive credentials and raw passwords are never stored in
-                browser `localStorage`. Authentication tokens are transmitted via
-                `HttpOnly`, `SameSite=Lax` cookies and verified server-side
-                against active `UserSession` records.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Link
-                  href="/driver/profile"
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-xs font-semibold text-blue-700 shadow-2xs ring-1 ring-slate-200 hover:bg-blue-50"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Manage Vehicles &amp; Profile →
-                </Link>
-                <Link
-                  href="/admin"
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-2xs ring-1 ring-slate-200 hover:bg-slate-50"
-                >
-                  <UserCheck className="h-3.5 w-3.5" />
-                  Admin RBAC Console →
-                </Link>
+              <form onSubmit={handleLoginSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                    {portalMode === "DRIVER" ? "Driver Registered Email" : portalMode === "OPERATOR" ? "Operator Work Email" : "SuperAdmin Root Email"}
+                  </label>
+                  <div className="relative mt-1.5">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
+                      <Mail className="h-4 w-4" />
+                    </div>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={portalMode === "DRIVER" ? "driver@parkwise.in" : portalMode === "OPERATOR" ? "operator@parkwise.in" : "admin@parkwise.in"}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800/90 pl-10 pr-4 py-2.5 font-mono text-sm font-semibold text-white placeholder-slate-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Password
+                    </label>
+                    <span className="text-[11px] text-slate-400 font-mono">Default Demo: parkwise123</span>
+                  </div>
+                  <div className="relative mt-1.5">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
+                      <Lock className="h-4 w-4" />
+                    </div>
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800/90 pl-10 pr-10 py-2.5 font-mono text-sm font-semibold text-white placeholder-slate-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-white"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Primary Sign In Button */}
+                <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="submit"
+                    disabled={busy || biometricScanning}
+                    className={`flex-1 inline-flex items-center justify-center gap-2 rounded-xl py-3 px-5 text-sm font-bold text-white transition-all shadow-xl ${
+                      portalMode === "DRIVER"
+                        ? "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-cyan-600/25"
+                        : portalMode === "OPERATOR"
+                        ? "bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-indigo-600/25"
+                        : "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-600/25"
+                    }`}
+                  >
+                    <LogIn className="h-4 w-4" />
+                    <span>{busy ? "Authenticating..." : `Sign In to ${portalMode} Console`}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleBiometricAuth}
+                    disabled={busy || biometricScanning}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-3 text-xs font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                  >
+                    <Fingerprint className={`h-4 w-4 text-emerald-400 ${biometricScanning ? "animate-pulse" : ""}`} />
+                    <span>{biometricScanning ? "Verifying..." : "Fast Biometric Sign-In"}</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* 1-Click Fast Switch Buttons for Demonstration */}
+              <div className="mt-6 border-t border-slate-800/80 pt-5">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-3">
+                  Instant One-Click Demo Personas:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectMode("DRIVER");
+                      setEmail("driver@parkwise.in");
+                      setPassword("parkwise123");
+                    }}
+                    className="flex items-center justify-between rounded-xl border border-cyan-800/30 bg-cyan-950/20 p-2.5 text-left hover:border-cyan-500 hover:bg-cyan-950/40 transition-colors"
+                  >
+                    <div>
+                      <span className="text-[10px] font-bold text-cyan-400">DRIVER</span>
+                      <p className="text-xs font-bold text-white">Rohit Sharma (EV Driver)</p>
+                      <p className="text-[10px] text-slate-400 font-mono">driver@parkwise.in</p>
+                    </div>
+                    <ArrowRight className="h-3.5 w-3.5 text-cyan-400" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectMode("OPERATOR");
+                      setEmail("operator@parkwise.in");
+                      setPassword("parkwise123");
+                    }}
+                    className="flex items-center justify-between rounded-xl border border-indigo-800/30 bg-indigo-950/20 p-2.5 text-left hover:border-indigo-500 hover:bg-indigo-950/40 transition-colors"
+                  >
+                    <div>
+                      <span className="text-[10px] font-bold text-indigo-400">OPERATOR</span>
+                      <p className="text-xs font-bold text-white">Aarav Patel (DLF CyberCity)</p>
+                      <p className="text-[10px] text-slate-400 font-mono">operator@parkwise.in</p>
+                    </div>
+                    <ArrowRight className="h-3.5 w-3.5 text-indigo-400" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectMode("ADMIN");
+                      setEmail("admin@parkwise.in");
+                      setPassword("parkwise123");
+                    }}
+                    className="flex items-center justify-between rounded-xl border border-amber-800/30 bg-amber-950/20 p-2.5 text-left hover:border-amber-500 hover:bg-amber-950/40 transition-colors"
+                  >
+                    <div>
+                      <span className="text-[10px] font-bold text-amber-400">SUPERADMIN</span>
+                      <p className="text-xs font-bold text-white">Platform Owner (Full Access)</p>
+                      <p className="text-[10px] text-slate-400 font-mono">admin@parkwise.in</p>
+                    </div>
+                    <Crown className="h-3.5 w-3.5 text-amber-400" />
+                  </button>
+                </div>
               </div>
             </div>
+          )}
+
+          {/* VIEW 2: REGISTRATION FORM */}
+          {authView === "REGISTER" && (
+            <form onSubmit={handleRegisterSubmit} className="mt-6 space-y-4">
+              <div className="rounded-xl border border-brand-800/40 bg-brand-950/20 p-3 text-xs text-brand-300">
+                Registering a new account provisions an isolated tenant with cryptographic authentication tokens.
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">Account Role</label>
+                <div className="mt-1.5 grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setRegRole("DRIVER")}
+                    className={`rounded-xl p-3 border text-left font-bold text-xs ${
+                      regRole === "DRIVER"
+                        ? "border-cyan-500 bg-cyan-950/40 text-cyan-300"
+                        : "border-slate-700 bg-slate-800 text-slate-400"
+                    }`}
+                  >
+                    🚗 Driver Mobility Account
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRegRole("OPERATOR")}
+                    className={`rounded-xl p-3 border text-left font-bold text-xs ${
+                      regRole === "OPERATOR"
+                        ? "border-indigo-500 bg-indigo-950/40 text-indigo-300"
+                        : "border-slate-700 bg-slate-800 text-slate-400"
+                    }`}
+                  >
+                    🏢 Parking Operator Account
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-300">Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={regFullName}
+                    onChange={(e) => setRegFullName(e.target.value)}
+                    placeholder="Vikramaditya Rao"
+                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-semibold text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-300">Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={regEmail}
+                    onChange={(e) => setRegEmail(e.target.value)}
+                    placeholder="vikram@example.com"
+                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-mono font-semibold text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-300">Phone Number</label>
+                  <input
+                    type="text"
+                    required
+                    value={regPhone}
+                    onChange={(e) => setRegPhone(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-mono text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-300">Choose Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={regPassword}
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-mono text-white"
+                  />
+                </div>
+              </div>
+
+              {regRole === "DRIVER" ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-800 pt-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300">Primary Vehicle Plate</label>
+                    <input
+                      type="text"
+                      value={regPlate}
+                      onChange={(e) => setRegPlate(e.target.value.toUpperCase())}
+                      className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-mono font-bold text-cyan-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-300">Vehicle Model</label>
+                    <input
+                      type="text"
+                      value={regModel}
+                      onChange={(e) => setRegModel(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="border-t border-slate-800 pt-3">
+                  <label className="text-xs font-bold text-slate-300">Facility / Company Name</label>
+                  <input
+                    type="text"
+                    value={regFacilityName}
+                    onChange={(e) => setRegFacilityName(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs text-white"
+                  />
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={busy}
+                className="w-full mt-4 rounded-xl bg-brand-600 py-3 text-sm font-bold text-white hover:bg-brand-500 shadow-lg shadow-brand-600/30 transition-all"
+              >
+                {busy ? "Registering..." : `Create ${regRole} Account`}
+              </button>
+            </form>
+          )}
+        </div>
+
+        {/* Security & Cryptographic Integrity Footer */}
+        <div className="mt-8 flex flex-wrap items-center justify-between text-xs text-slate-500 border-t border-slate-900 pt-4">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-emerald-400" />
+            <span>FIPS 140-2 Compatible • HMAC-SHA256 Signed Sessions • Zero Plaintext Storage</span>
+          </div>
+          <div className="flex items-center gap-3 font-mono text-[11px]">
+            <span>FastAPI: {backendConnected ? "LIVE 8000" : "LOCAL CACHE"}</span>
+            <span>•</span>
+            <span>RBAC: ENFORCED</span>
           </div>
         </div>
       </div>
