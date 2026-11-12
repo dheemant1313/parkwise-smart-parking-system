@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
 import { DriverSubNav } from "@/components/driver/DriverSubNav";
 import { ParkingMapView } from "@/components/map/ParkingMapView";
@@ -249,6 +250,15 @@ export default function DriverMapPage() {
                 <span className="hidden sm:inline">AI Smart Match</span>
                 <span className="sm:hidden">AI Match</span>
               </button>
+              <Link
+                href="/driver/indoor?facilityId=1&slot=C-142&bookingId=1"
+                className="shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-900/95 hover:bg-slate-800 text-cyan-400 font-semibold text-xs shadow-lg border border-cyan-500/40 transition transform active:scale-95 cursor-pointer"
+                title="Indoor Garage Navigation to Allotted Slot C-142"
+              >
+                <Compass className="h-4 w-4 text-cyan-400" />
+                <span className="hidden sm:inline">Indoor Nav (Slot C-142)</span>
+                <span className="sm:hidden">Indoor</span>
+              </Link>
               <div className="overflow-x-auto">
                 <MapFilterBar
                   radiusKm={radiusKm}
