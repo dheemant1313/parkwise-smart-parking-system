@@ -14,6 +14,18 @@ jobs:
     name: Backend Test Suite & Security Audit
     runs-on: ubuntu-latest
 
+    env:
+      PYTHONPATH: backend:.
+      ENVIRONMENT: test
+      REDIS_URL: redis://localhost:6379/0
+      DATABASE_URL: sqlite:///./parkwise_test.db
+      JWT_SECRET_KEY: parkwise-ci-test-jwt-secret-key-2026-prod-ready
+      QR_HMAC_SECRET: parkwise-ci-test-qr-hmac-secret-2026-prod-ready
+      RAZORPAY_KEY_ID: rzp_test_parkwise_in_2026
+      RAZORPAY_KEY_SECRET: parkwise-razorpay-sim-secret
+      RAZORPAY_WEBHOOK_SECRET: parkwise-razorpay-webhook-secret
+      PAYMENT_SIMULATION_MODE: "true"
+
     services:
       redis:
         image: redis:7-alpine
@@ -34,6 +46,7 @@ jobs:
         with:
           python-version: "3.10"
           cache: "pip"
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install Python Dependencies
         run: |
@@ -44,22 +57,27 @@ jobs:
       - name: Execute Phase 01-07 Core Integration Tests
         run: |
           cd backend
-          pytest -v tests/test_api.py
+          python -m pytest -v tests/test_api.py
 
       - name: Execute Phase 08 Advanced Ecosystem Tests
         run: |
           cd backend
-          pytest -v tests/test_phase08_ecosystem.py
+          python -m pytest -v tests/test_phase08_ecosystem.py
 
       - name: Execute Phase 09 Production Readiness & Security Tests
         run: |
           cd backend
-          pytest -v tests/test_phase09_production_readiness.py
+          python -m pytest -v tests/test_phase09_production_readiness.py
 
       - name: Execute Phase 10 Map Foundation & Facility Tests
         run: |
           cd backend
-          pytest -v tests/test_phase10_map_and_facilities.py
+          python -m pytest -v tests/test_phase10_map_and_facilities.py
+
+      - name: Execute Phase 11 Interactive Driver Map & Outdoor Navigation Tests
+        run: |
+          cd backend
+          python -m pytest -v tests/test_phase11_interactive_map_navigation.py
 
   # ----------------------------------------------------------------------------
   # 2. Frontend Verification & TypeScript Compilation

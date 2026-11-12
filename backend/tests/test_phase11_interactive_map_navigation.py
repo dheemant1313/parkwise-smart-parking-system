@@ -47,7 +47,10 @@ def _run_sync(coro: Coroutine[Any, Any, Any]) -> Any:
 @pytest.fixture(scope="module")
 def db():
     """Module-level session for Phase 11 testing."""
+    from app.seed_facility import seed_phase10_facilities
+    Base.metadata.create_all(bind=engine)
     session: Session = SessionLocal()
+    seed_phase10_facilities(session)
     try:
         yield session
     finally:

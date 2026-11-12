@@ -28,7 +28,7 @@ from app.auth import (
     verify_password,
 )
 from app.config import settings
-from app.database import SessionLocal
+from app.database import Base, SessionLocal, engine
 from app.models import (
     Booking,
     BookingStatus,
@@ -78,9 +78,12 @@ def _run_sync(coro):
         coro.close()
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def db():
+    from app.seed import seed_initial_data
+    Base.metadata.create_all(bind=engine)
     session = SessionLocal()
+    seed_initial_data(session)
     try:
         yield session
     finally:
