@@ -13,8 +13,21 @@ import {
   AlertTriangle,
   Zap,
   Car,
+  CornerUpRight,
+  CornerUpLeft,
+  ArrowUp,
+  ExternalLink,
+  X,
+  Sun,
+  Moon,
+  Sparkles,
 } from "lucide-react";
-import { FacilityEntrance, NearbyFacilityItem, ParkingFacilitySummary } from "@/lib/facilityApi";
+import {
+  FacilityEntrance,
+  NearbyFacilityItem,
+  OutdoorRouteResponse,
+  ParkingFacilitySummary,
+} from "@/lib/facilityApi";
 
 interface ParkingMapViewProps {
   facilities: (ParkingFacilitySummary | NearbyFacilityItem)[];
@@ -25,6 +38,9 @@ interface ParkingMapViewProps {
   onSelectEntrance?: (entrance: FacilityEntrance) => void;
   searchRadiusKm?: number;
   isLoading?: boolean;
+  activeRoute?: OutdoorRouteResponse | null;
+  onExitNavigation?: () => void;
+  onBookFacility?: (facility: ParkingFacilitySummary) => void;
 }
 
 export function ParkingMapView({
@@ -36,6 +52,9 @@ export function ParkingMapView({
   onSelectEntrance,
   searchRadiusKm = 10,
   isLoading = false,
+  activeRoute = null,
+  onExitNavigation,
+  onBookFacility,
 }: ParkingMapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -51,7 +70,8 @@ export function ParkingMapView({
   const [zoom, setZoom] = useState<number>(14);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [tileMode, setTileMode] = useState<"standard" | "dark" | "satellite">("standard");
+  const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
+  const [selectedAltRouteId, setSelectedAltRouteId] = useState<string | null>(null);
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -66,14 +86,20 @@ export function ParkingMapView({
     return () => window.removeEventListener("resize", updateDimensions);
   }, []);
 
-  // Synchronize center when selectedFacility changes
+  // Synchronize center when activeRoute or selectedFacility changes
   useEffect(() => {
-    if (selectedFacility) {
+    if (activeRoute && driverLocation) {
+      // In navigation mode, center between driver and entrance
+      const midLat = (driverLocation.lat + activeRoute.destination_coordinates.latitude) / 2;
+      const midLng = (driverLocation.lng + activeRoute.destination_coordinates.longitude) / 2;
+      setCenter({ lat: midLat, lng: midLng });
+      setZoom(14);
+    } else if (selectedFacility) {
       setCenter({ lat: selectedFacility.latitude, lng: selectedFacility.longitude });
     } else if (driverLocation) {
       setCenter({ lat: driverLocation.lat, lng: driverLocation.lng });
     }
-  }, [selectedFacility, driverLocation]);
+  }, [selectedFacility, driverLocation, activeRoute]);
 
   // Recenter map on driver location
   const handleRecenter = () => {
@@ -173,6 +199,84 @@ export function ParkingMapView({
     "facility" in item ? item.facility : item
   );
 
+  // Spatial clustering when zoomed out (zoom <= 12)
+  const isClustered = zoom <= 12;
+  const clusters: {
+    id: string;
+    lat: number;
+    lng: number;
+    count: number;
+    minPrice: number;
+    totalSlots: number;
+    items: ParkingFacilitySummary[];
+  }[] = [];
+
+  if (isClustered && facilityItems.length > 0) {
+    const used = new Set<number>();
+    const thresholdKm = zoom <= 10 ? 8.0 : zoom <= 11 ? 5.0 : 3.0;
+
+    for (let i = 0; i < facilityItems.length; i++) {
+      if (used.has(i)) continue;
+      const group = [facilityItems[i]];
+      used.add(i);
+
+      for (let j = 0; j < facilityItems.length; j++) {
+        if (used.has(j)) continue;
+        const dLat = facilityItems[i].latitude - facilityItems[j].latitude;
+        const dLng = facilityItems[i].longitude - facilityItems[j].longitude;
+        const approxKm = Math.sqrt(dLat * dLat + dLng * dLng) * 111;
+        if (approxKm <= thresholdKm) {
+          group.push(facilityItems[j]);
+          used.add(j);
+        }
+      }
+
+      const avgLat = group.reduce((sum, f) => sum + f.latitude, 0) / group.length;
+      const avgLng = group.reduce((sum, f) => sum + f.longitude, 0) / group.length;
+      const minPrice = Math.min(...group.map((f) => f.base_hourly_rate_inr));
+      const totalSlots = group.reduce((sum, f) => sum + f.available_capacity, 0);
+
+      clusters.push({
+        id: `clust-${i}`,
+        lat: avgLat,
+        lng: avgLng,
+        count: group.length,
+        minPrice,
+        totalSlots,
+        items: group,
+      });
+    }
+  }
+
+  // Active navigation route points
+  const activeWaypoints =
+    activeRoute && selectedAltRouteId && activeRoute.alternative_routes.length > 0
+      ? activeRoute.alternative_routes.find((a) => a.route_id === selectedAltRouteId)?.waypoints ||
+        activeRoute.waypoints
+      : activeRoute?.waypoints || [];
+
+  const polylinePointsString = activeWaypoints
+    .map((wp) => {
+      const p = latLngToPixels(wp.lat, wp.lng);
+      return `${p.x},${p.y}`;
+    })
+    .join(" ");
+
+  const altWaypoints =
+    activeRoute?.alternative_routes && activeRoute.alternative_routes.length > 0
+      ? activeRoute.alternative_routes[0].waypoints
+      : [];
+
+  const altPolylinePointsString = altWaypoints
+    .map((wp) => {
+      const p = latLngToPixels(wp.lat, wp.lng);
+      return `${p.x},${p.y}`;
+    })
+    .join(" ");
+
+  // Next maneuver step
+  const nextStep = activeRoute?.steps && activeRoute.steps.length > 0 ? activeRoute.steps[0] : null;
+
   return (
     <div
       ref={containerRef}
@@ -186,35 +290,51 @@ export function ParkingMapView({
       onWheel={handleWheel}
       className={`absolute inset-0 h-full w-full overflow-hidden select-none cursor-${
         isDragging ? "grabbing" : "grab"
-      } bg-slate-950`}
+      } ${themeMode === "light" ? "bg-slate-100" : "bg-slate-950"}`}
       style={{
         backgroundImage:
-          tileMode === "dark"
-            ? "radial-gradient(circle at 1px 1px, #1e293b 1px, transparent 0)"
-            : "radial-gradient(circle at 1px 1px, #0f172a 1px, transparent 0)",
+          themeMode === "light"
+            ? "radial-gradient(circle at 1px 1px, #cbd5e1 1px, transparent 0)"
+            : "radial-gradient(circle at 1px 1px, #1e293b 1px, transparent 0)",
         backgroundSize: "28px 28px",
       }}
     >
       {/* Background Map Grid & Coordinate System */}
-      <div className="absolute inset-0 pointer-events-none opacity-20">
+      <div
+        className={`absolute inset-0 pointer-events-none ${
+          themeMode === "light" ? "opacity-15" : "opacity-20"
+        }`}
+      >
         <svg className="w-full h-full">
           <defs>
-            <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
-              <path d="M 60 0 L 0 0 0 60" fill="none" stroke="#38bdf8" strokeWidth="0.5" />
+            <pattern id="mapgrid" width="60" height="60" patternUnits="userSpaceOnUse">
+              <path
+                d="M 60 0 L 0 0 0 60"
+                fill="none"
+                stroke={themeMode === "light" ? "#0284c7" : "#38bdf8"}
+                strokeWidth="0.5"
+              />
             </pattern>
           </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
+          <rect width="100%" height="100%" fill="url(#mapgrid)" />
         </svg>
       </div>
 
       {/* Driver Location Accuracy Radius Circle */}
-      {driverLocation && (
+      {driverLocation &&
         (() => {
           const pos = latLngToPixels(driverLocation.lat, driverLocation.lng);
-          const pxRadius = Math.max(20, (driverLocation.accuracy || 45) * Math.pow(2, zoom) * 0.002);
+          const pxRadius = Math.max(
+            20,
+            (driverLocation.accuracy || 35) * Math.pow(2, zoom) * 0.002
+          );
           return (
             <div
-              className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 rounded-full border border-blue-400/50 bg-blue-500/10 transition-all duration-300"
+              className={`absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 rounded-full border transition-all duration-300 ${
+                themeMode === "light"
+                  ? "border-blue-500/40 bg-blue-500/10"
+                  : "border-blue-400/50 bg-blue-500/10"
+              }`}
               style={{
                 left: `${pos.x}px`,
                 top: `${pos.y}px`,
@@ -223,11 +343,10 @@ export function ParkingMapView({
               }}
             />
           );
-        })()
-      )}
+        })()}
 
       {/* Driver GPS Location Beacon */}
-      {driverLocation && (
+      {driverLocation &&
         (() => {
           const pos = latLngToPixels(driverLocation.lat, driverLocation.lng);
           return (
@@ -237,20 +356,67 @@ export function ParkingMapView({
             >
               <div className="relative flex items-center justify-center">
                 <span className="absolute h-8 w-8 animate-ping rounded-full bg-blue-500 opacity-75" />
-                <div className="relative flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-blue-600 shadow-lg shadow-blue-500/50">
+                <div className="relative flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-blue-600 shadow-xl shadow-blue-500/60">
                   <Navigation className="h-3 w-3 text-white fill-white rotate-45" />
                 </div>
               </div>
-              <div className="mt-1 whitespace-nowrap rounded-md bg-slate-900/90 px-1.5 py-0.5 text-[9px] font-bold text-blue-300 backdrop-blur shadow">
+              <div
+                className={`mt-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[9px] font-bold shadow ${
+                  themeMode === "light"
+                    ? "bg-white/95 text-blue-700 border border-slate-200"
+                    : "bg-slate-900/90 text-blue-300 backdrop-blur"
+                }`}
+              >
                 You are here (±{driverLocation.accuracy || 30}m)
               </div>
             </div>
           );
-        })()
+        })()}
+
+      {/* Active Outdoor Navigation Polyline Route (When Route Active) */}
+      {activeRoute && polylinePointsString && (
+        <svg className="absolute inset-0 pointer-events-none z-15 w-full h-full">
+          {/* Alternative Route Polyline (Dashed Cyan) */}
+          {altPolylinePointsString && (
+            <polyline
+              points={altPolylinePointsString}
+              fill="none"
+              stroke="#06b6d4"
+              strokeWidth="4"
+              strokeDasharray="8 6"
+              strokeOpacity="0.5"
+            />
+          )}
+
+          {/* Main Route Outer Glow */}
+          <polyline
+            points={polylinePointsString}
+            fill="none"
+            stroke="#2563eb"
+            strokeWidth="8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeOpacity="0.8"
+          />
+
+          {/* Main Route High-Vis Core (Electric Blue Pulse) */}
+          <polyline
+            points={polylinePointsString}
+            fill="none"
+            stroke="#60a5fa"
+            strokeWidth="4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray="10 8"
+            className="animate-pulse"
+          />
+        </svg>
       )}
 
-      {/* Animated Route Line from Driver to Selected Entrance */}
-      {driverLocation && selectedEntrance && (
+      {/* Fallback Direct Vector Line to Entrance when no turn route is calculated */}
+      {!activeRoute &&
+        driverLocation &&
+        selectedEntrance &&
         (() => {
           const p1 = latLngToPixels(driverLocation.lat, driverLocation.lng);
           const p2 = latLngToPixels(selectedEntrance.latitude, selectedEntrance.longitude);
@@ -268,82 +434,117 @@ export function ParkingMapView({
               />
             </svg>
           );
-        })()
-      )}
+        })()}
 
-      {/* Facility Location Markers */}
-      {facilityItems.map((facility) => {
-        const pos = latLngToPixels(facility.latitude, facility.longitude);
-        const isSelected = selectedFacility?.id === facility.id;
-        const isAvailable = facility.available_capacity > 0;
-
-        return (
-          <div
-            key={facility.id}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelectFacility(facility);
-            }}
-            className={`absolute -translate-x-1/2 -translate-y-full z-20 cursor-pointer transition-transform duration-200 hover:scale-110 ${
-              isSelected ? "scale-125 z-40" : ""
-            }`}
-            style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
-          >
-            <div className="relative flex flex-col items-center group">
-              {/* Tooltip / Label */}
-              <div
-                className={`mb-1 whitespace-nowrap rounded-lg px-2.5 py-1 text-[11px] font-bold shadow-lg transition-all ${
-                  isSelected
-                    ? "bg-blue-600 text-white shadow-blue-500/40"
-                    : "bg-slate-900/95 text-slate-100 border border-slate-700/80"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span
-                    className={`h-2 w-2 rounded-full ${
-                      isAvailable ? "bg-emerald-400" : "bg-rose-500"
-                    }`}
-                  />
-                  <span>{facility.name}</span>
-                  <span className="font-mono text-xs opacity-90 font-medium">
-                    ₹{facility.base_hourly_rate_inr}/h
-                  </span>
+      {/* Spatially Clustered Markers (Zoom <= 12) */}
+      {isClustered &&
+        clusters.map((cl) => {
+          const pos = latLngToPixels(cl.lat, cl.lng);
+          return (
+            <div
+              key={cl.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                // Zoom in and center on cluster
+                setCenter({ lat: cl.lat, lng: cl.lng });
+                setZoom(14);
+              }}
+              className="absolute -translate-x-1/2 -translate-y-1/2 z-30 cursor-pointer transition-transform hover:scale-115"
+              style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
+            >
+              <div className="relative flex flex-col items-center">
+                <span className="absolute -inset-1 rounded-full bg-blue-500/30 animate-ping opacity-60" />
+                <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-white bg-blue-600 text-white shadow-2xl shadow-blue-500/50">
+                  <div className="flex flex-col items-center">
+                    <span className="text-xs font-black leading-none">{cl.count}</span>
+                    <span className="text-[8px] uppercase tracking-tighter opacity-90">Hubs</span>
+                  </div>
+                </div>
+                <div className="mt-1 whitespace-nowrap rounded-lg bg-slate-900/90 px-2 py-0.5 text-[10px] font-bold text-emerald-400 border border-slate-700 backdrop-blur shadow">
+                  from ₹{cl.minPrice}/h • {cl.totalSlots} bays
                 </div>
               </div>
-
-              {/* Pin Icon with Capacity Badge */}
-              <div
-                className={`relative flex h-10 w-10 items-center justify-center rounded-2xl border-2 shadow-xl ${
-                  isSelected
-                    ? "border-blue-400 bg-blue-600 text-white shadow-blue-600/50"
-                    : isAvailable
-                    ? "border-emerald-400/80 bg-slate-900 text-emerald-400 shadow-emerald-500/20"
-                    : "border-rose-400/80 bg-slate-900 text-rose-400"
-                }`}
-              >
-                <Car className="h-5 w-5" />
-                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-slate-900 px-1 text-[9px] font-black border border-slate-700">
-                  {facility.available_capacity}
-                </span>
-              </div>
-
-              {/* Pin Tip */}
-              <div
-                className={`h-2 w-2 rotate-45 -mt-1 border-r-2 border-b-2 ${
-                  isSelected
-                    ? "border-blue-400 bg-blue-600"
-                    : isAvailable
-                    ? "border-emerald-400/80 bg-slate-900"
-                    : "border-rose-400/80 bg-slate-900"
-                }`}
-              />
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
 
-      {/* Facility Entrance Markers (When a facility is selected) */}
-      {selectedFacility &&
+      {/* Individual Facility Markers (Zoom > 12) */}
+      {!isClustered &&
+        facilityItems.map((facility) => {
+          const pos = latLngToPixels(facility.latitude, facility.longitude);
+          const isSelected = selectedFacility?.id === facility.id;
+          const isAvailable = facility.available_capacity > 0;
+
+          return (
+            <div
+              key={facility.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectFacility(facility);
+              }}
+              className={`absolute -translate-x-1/2 -translate-y-full z-20 cursor-pointer transition-all duration-200 hover:scale-110 ${
+                isSelected ? "scale-125 z-40" : ""
+              }`}
+              style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
+            >
+              <div className="relative flex flex-col items-center group">
+                {/* Tooltip / Label */}
+                <div
+                  className={`mb-1 whitespace-nowrap rounded-xl px-2.5 py-1 text-[11px] font-bold shadow-lg transition-all ${
+                    isSelected
+                      ? "bg-blue-600 text-white shadow-blue-500/50 ring-2 ring-white/40"
+                      : themeMode === "light"
+                      ? "bg-white text-slate-800 border border-slate-200 shadow-md"
+                      : "bg-slate-900/95 text-slate-100 border border-slate-700/80"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        isAvailable ? "bg-emerald-400" : "bg-rose-500"
+                      }`}
+                    />
+                    <span>{facility.name}</span>
+                    <span className="font-mono text-xs opacity-90 font-medium">
+                      ₹{facility.base_hourly_rate_inr}/h
+                    </span>
+                  </div>
+                </div>
+
+                {/* Parkwise Custom Electric Blue Pin with Capacity Badge */}
+                <div
+                  className={`relative flex h-10 w-10 items-center justify-center rounded-2xl border-2 shadow-xl ${
+                    isSelected
+                      ? "border-blue-400 bg-blue-600 text-white shadow-blue-600/50"
+                      : isAvailable
+                      ? "border-emerald-400/80 bg-slate-900 text-emerald-400 shadow-emerald-500/20"
+                      : "border-rose-400/80 bg-slate-900 text-rose-400"
+                  }`}
+                >
+                  <Car className="h-5 w-5" />
+                  <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-slate-900 px-1 text-[9px] font-black border border-slate-700 text-white">
+                    {facility.available_capacity}
+                  </span>
+                </div>
+
+                {/* Pin Tip */}
+                <div
+                  className={`h-2 w-2 rotate-45 -mt-1 border-r-2 border-b-2 ${
+                    isSelected
+                      ? "border-blue-400 bg-blue-600"
+                      : isAvailable
+                      ? "border-emerald-400/80 bg-slate-900"
+                      : "border-rose-400/80 bg-slate-900"
+                  }`}
+                />
+              </div>
+            </div>
+          );
+        })}
+
+      {/* Facility Entrance Markers (When Selected) */}
+      {!isClustered &&
+        selectedFacility &&
         selectedFacility.primary_entrance &&
         (() => {
           const ent = selectedFacility.primary_entrance;
@@ -361,10 +562,10 @@ export function ParkingMapView({
               style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
             >
               <div className="flex flex-col items-center">
-                <div className="mb-0.5 rounded bg-emerald-600/95 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">
+                <div className="mb-0.5 rounded bg-emerald-600/95 px-2 py-0.5 text-[9px] font-bold text-white shadow">
                   Entrance • {ent.height_clearance_meters}m
                 </div>
-                <div className="flex h-7 w-7 items-center justify-center rounded-full border border-emerald-400 bg-emerald-500 text-slate-950 shadow-lg">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-emerald-500 text-slate-950 shadow-xl">
                   <ShieldCheck className="h-4 w-4" />
                 </div>
               </div>
@@ -372,50 +573,121 @@ export function ParkingMapView({
           );
         })()}
 
+      {/* TOP NAVIGATION HUD (Active when in outdoor navigation mode) */}
+      {activeRoute && (
+        <div className="absolute top-4 left-4 right-4 z-40 max-w-xl mx-auto animate-fade-in">
+          <div className="rounded-3xl border border-blue-500/50 bg-slate-900/95 p-4 text-white shadow-2xl backdrop-blur-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/40">
+                  <CornerUpRight className="h-6 w-6" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-bold text-blue-400 uppercase tracking-wider">
+                    Next Maneuver • In 400m
+                  </div>
+                  <div className="text-sm font-bold text-slate-100">
+                    {nextStep ? nextStep.instruction : "Proceed to facility entrance"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Exit Navigation Button */}
+              {onExitNavigation && (
+                <button
+                  type="button"
+                  onClick={onExitNavigation}
+                  className="rounded-full p-2 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+                  title="Exit Navigation"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              )}
+            </div>
+
+            {/* Navigation Telemetry Bar */}
+            <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-sm font-black text-emerald-400">
+                  ~{activeRoute.duration_minutes} mins
+                </span>
+                <span className="text-slate-400 font-medium">• {activeRoute.distance_km} km</span>
+                <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-blue-300">
+                  {activeRoute.traffic_condition} Traffic
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                <span>{activeRoute.entrance.gate_name}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Floating Map Controls (Top Right) */}
       <div className="absolute top-4 right-4 z-40 flex flex-col gap-2">
         <button
           onClick={() => setZoom((z) => Math.min(19, z + 1))}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/90 text-slate-200 shadow-lg backdrop-blur hover:bg-slate-800 transition"
+          className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-lg backdrop-blur transition ${
+            themeMode === "light"
+              ? "border-slate-300 bg-white/90 text-slate-800 hover:bg-white"
+              : "border-slate-700/80 bg-slate-900/90 text-slate-200 hover:bg-slate-800"
+          }`}
           title="Zoom In"
         >
           <ZoomIn className="h-4 w-4" />
         </button>
         <button
           onClick={() => setZoom((z) => Math.max(10, z - 1))}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/90 text-slate-200 shadow-lg backdrop-blur hover:bg-slate-800 transition"
+          className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-lg backdrop-blur transition ${
+            themeMode === "light"
+              ? "border-slate-300 bg-white/90 text-slate-800 hover:bg-white"
+              : "border-slate-700/80 bg-slate-900/90 text-slate-200 hover:bg-slate-800"
+          }`}
           title="Zoom Out"
         >
           <ZoomOut className="h-4 w-4" />
         </button>
         <button
           onClick={handleRecenter}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/90 text-blue-400 shadow-lg backdrop-blur hover:bg-slate-800 transition"
+          className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-lg backdrop-blur transition ${
+            themeMode === "light"
+              ? "border-slate-300 bg-white/90 text-blue-600 hover:bg-white"
+              : "border-slate-700/80 bg-slate-900/90 text-blue-400 hover:bg-slate-800"
+          }`}
           title="Recenter on My Location"
         >
           <Crosshair className="h-4 w-4" />
         </button>
+        {/* Light / Dark Mode Toggle */}
         <button
-          onClick={() =>
-            setTileMode((m) =>
-              m === "standard" ? "dark" : m === "dark" ? "satellite" : "standard"
-            )
-          }
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/90 text-slate-200 shadow-lg backdrop-blur hover:bg-slate-800 transition"
-          title={`Layer Mode: ${tileMode}`}
+          onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}
+          className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-lg backdrop-blur transition ${
+            themeMode === "light"
+              ? "border-slate-300 bg-white/90 text-amber-500 hover:bg-white"
+              : "border-slate-700/80 bg-slate-900/90 text-amber-300 hover:bg-slate-800"
+          }`}
+          title={`Switch to ${themeMode === "dark" ? "Light (Apple Style)" : "Dark (Tesla Style)"}`}
         >
-          <Layers className="h-4 w-4" />
+          {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
       </div>
 
-      {/* Map Attribution & Status (Bottom Left) */}
-      <div className="absolute bottom-4 left-4 z-40 flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-1.5 text-[11px] text-slate-400 backdrop-blur">
-        <Compass className="h-3.5 w-3.5 text-blue-400" />
+      {/* Map Attribution & Telemetry Status (Bottom Left) */}
+      <div
+        className={`absolute bottom-4 left-4 z-40 flex items-center gap-2 rounded-xl border px-3 py-1.5 text-[11px] backdrop-blur ${
+          themeMode === "light"
+            ? "border-slate-300 bg-white/90 text-slate-700"
+            : "border-slate-800 bg-slate-950/90 text-slate-400"
+        }`}
+      >
+        <Compass className="h-3.5 w-3.5 text-blue-500" />
         <span>
           Center: {center.lat.toFixed(4)}°N, {center.lng.toFixed(4)}°E • Zoom {zoom}
         </span>
-        <span className="h-2 w-px bg-slate-700" />
-        <span className="text-emerald-400 font-medium">
+        <span className="h-2 w-px bg-slate-600" />
+        <span className="text-emerald-500 font-medium">
           {facilityItems.length} Smart Facilities Live
         </span>
       </div>

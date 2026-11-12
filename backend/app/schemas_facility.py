@@ -214,3 +214,118 @@ class FacilityCreateRequest(BaseModel):
     supported_vehicle_types: Optional[List[str]] = None
     amenities: Optional[List[str]] = None
     photos: Optional[List[str]] = None
+
+
+# ------------------------------------------------------------------------------
+# 3. Phase 11: Navigation, Clustering & Direct Booking Schemas
+# ------------------------------------------------------------------------------
+class RouteStepSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    step_number: int
+    instruction: str
+    distance_meters: int
+    duration_seconds: int
+    turn_type: str = "STRAIGHT"  # STRAIGHT, TURN_RIGHT, TURN_LEFT, RAMP_ENTRY, MERGE, ARRIVE
+    street_name: str
+
+
+class AlternativeRouteSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    route_id: str
+    name: str
+    distance_km: float
+    duration_minutes: int
+    time_diff_minutes: int
+    summary: str
+    waypoints: List[Dict[str, float]]
+
+
+class OutdoorRouteResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    facility_id: int
+    facility_name: str
+    origin_coordinates: Dict[str, float]
+    destination_coordinates: Dict[str, float]
+    entrance: FacilityEntranceSchema
+    distance_km: float
+    duration_minutes: int
+    summary: str
+    traffic_condition: str = "MODERATE"
+    waypoints: List[Dict[str, float]]
+    steps: List[RouteStepSchema]
+    alternative_routes: List[AlternativeRouteSchema]
+    external_links: Dict[str, str]
+
+
+class DirectFacilityBookingRequest(BaseModel):
+    vehicle_number: str = Field(..., min_length=4, max_length=20, description="e.g. DL-01-AB-1234")
+    vehicle_type: str = Field("SEDAN", description="SUV, SEDAN, HATCHBACK, EV, TWO_WHEELER")
+    driver_name: str = Field("Aarav Sharma", min_length=2, max_length=100)
+    driver_phone: str = Field("+919876543210", min_length=10, max_length=20)
+    duration_hours: int = Field(2, ge=1, le=72)
+    ev_charging_requested: bool = False
+    entrance_id: Optional[int] = None
+
+
+class DirectFacilityBookingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    booking_reference: str
+    facility_id: int
+    facility_name: str
+    facility_address: str
+    assigned_slot_number: str
+    assigned_slot_floor: str
+    assigned_entrance: FacilityEntranceSchema
+    vehicle_number: str
+    vehicle_type: str
+    duration_hours: int
+    base_rate_inr: float
+    total_amount_inr: float
+    payment_status: str = "PAID"
+    qr_token: str
+    qr_pass_url: str
+    navigation_ready: bool = True
+    directions_url: str
+    created_at: datetime
+
+
+class FacilityClusterSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    cluster_id: str
+    latitude: float
+    longitude: float
+    count: int
+    min_price: float
+    max_price: float
+    total_available_slots: int
+    facility_ids: List[int]
+    facility_names: List[str]
+
+
+class FacilityClusterListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    zoom: int
+    total_clusters: int
+    total_facilities: int
+    clusters: List[FacilityClusterSchema]
+
+
+class FacilityAvailabilityBreakdownResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    facility_id: int
+    facility_name: str
+    total_capacity: int
+    available_capacity: int
+    occupancy_percentage: int
+    slots_by_vehicle_type: Dict[str, int]
+    ev_charging_available: int
+    next_available_slot: str
+    is_booking_available: bool
+
