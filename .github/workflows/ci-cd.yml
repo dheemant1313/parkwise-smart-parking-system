@@ -56,6 +56,11 @@ jobs:
           cd backend
           pytest -v tests/test_phase09_production_readiness.py
 
+      - name: Execute Phase 10 Map Foundation & Facility Tests
+        run: |
+          cd backend
+          pytest -v tests/test_phase10_map_and_facilities.py
+
   # ----------------------------------------------------------------------------
   # 2. Frontend Verification & TypeScript Compilation
   # ----------------------------------------------------------------------------

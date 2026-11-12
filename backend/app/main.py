@@ -193,6 +193,9 @@ from app.services.payment_service import (
 from app.services.websocket_manager import ws_manager
 import app.models_ecosystem
 from app.router_ecosystem import router as ecosystem_router
+import app.models_facility
+from app.router_facility import router as facility_router
+from app.seed_facility import seed_phase10_facilities
 from app.privacy import (
     get_dpdp_compliance_summary,
     mask_email,
@@ -207,6 +210,7 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         seed_initial_data(db)
+        seed_phase10_facilities(db)
     finally:
         db.close()
     yield
@@ -231,6 +235,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(ecosystem_router)
+app.include_router(facility_router, prefix="/api/v1/parking")
+app.include_router(facility_router, prefix="/api/parking")
 
 
 @app.middleware("http")

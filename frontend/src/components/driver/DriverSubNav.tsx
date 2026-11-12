@@ -10,6 +10,7 @@ import {
   Compass,
   KeyRound,
   MapPin,
+  Navigation,
   UserCheck,
 } from "lucide-react";
 import { useParkwise } from "@/lib/store";
@@ -30,6 +31,12 @@ export function DriverSubNav() {
       href: "/driver",
       label: "Find & Reserve Parking",
       icon: Compass,
+      exact: true,
+    },
+    {
+      href: "/driver/map",
+      label: "Live Map & Entrances",
+      icon: Navigation,
       exact: true,
     },
     {

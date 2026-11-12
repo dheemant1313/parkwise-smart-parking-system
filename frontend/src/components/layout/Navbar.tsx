@@ -8,6 +8,7 @@ import {
   Building2,
   CarFront,
   ChevronDown,
+  Compass,
   Cpu,
   KeyRound,
   Layers,
@@ -36,6 +37,14 @@ const ALL_PLATFORM_APPS = [
     desc: "Find, reserve & navigate to smart parking",
     icon: CarFront,
     color: "text-blue-600 bg-blue-50",
+    roles: ["DRIVER", "ADMIN"],
+  },
+  {
+    href: "/driver/map",
+    name: "Live Map & Entrances",
+    desc: "Discover nearby facilities and entrance waypoints",
+    icon: Compass,
+    color: "text-sky-600 bg-sky-50",
     roles: ["DRIVER", "ADMIN"],
   },
   {
