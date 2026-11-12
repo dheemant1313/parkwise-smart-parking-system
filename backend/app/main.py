@@ -2,6 +2,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import secrets
+import time
 from typing import List, Optional
 from fastapi import (
     Depends,
@@ -192,6 +193,12 @@ from app.services.payment_service import (
 from app.services.websocket_manager import ws_manager
 import app.models_ecosystem
 from app.router_ecosystem import router as ecosystem_router
+from app.privacy import (
+    get_dpdp_compliance_summary,
+    mask_email,
+    mask_phone,
+    mask_vehicle_plate,
+)
 
 
 @asynccontextmanager
@@ -224,6 +231,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(ecosystem_router)
+
+
+@app.middleware("http")
+async def add_process_time_and_security_headers(request: Request, call_next):
+    start_time = time.monotonic()
+    response = await call_next(request)
+    process_time_ms = round((time.monotonic() - start_time) * 1000, 2)
+    response.headers["X-Process-Time"] = f"{process_time_ms}ms"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 
 def _serialize_user_profile(user: User) -> UserProfileResponse:
@@ -413,6 +432,38 @@ async def health_check(db: Session = Depends(get_db)):
             "total_users": user_count,
         },
     }
+
+
+@app.get("/api/v1/health/live")
+async def liveness_probe():
+    """Kubernetes / Docker liveness probe - returns 200 immediately if process is alive."""
+    return {"status": "alive", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/v1/health/ready")
+async def readiness_probe(db: Session = Depends(get_db)):
+    """Kubernetes / Docker readiness probe - verifies database & cache readiness."""
+    try:
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
+        db_status = "connected"
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database readiness check failed: {str(e)}",
+        )
+    return {
+        "status": "ready",
+        "database": db_status,
+        "environment": settings.ENVIRONMENT,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/v1/privacy/dpdp-compliance")
+async def dpdp_compliance_endpoint():
+    """Returns DPDP Act 2023 compliance status and data minimization policies."""
+    return get_dpdp_compliance_summary()
 
 
 # ----------------------------------------------------------------------------
@@ -630,14 +681,20 @@ ACTIVE_PHONE_OTPS = {}
 @app.post("/api/v1/auth/send-otp")
 async def send_phone_otp(
     payload: SendOtpRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    client_ip = request.client.host if request.client else "127.0.0.1"
     normalized = payload.phone.strip().replace(" ", "").replace("-", "")
     if not normalized.startswith("+"):
         if len(normalized) == 10:
             normalized = f"+91{normalized}"
         else:
             normalized = f"+{normalized}"
+
+    auth_rate_limiter.check_rate_limit(
+        "send-otp", f"{client_ip}:{normalized}", max_requests=5, window_seconds=60
+    )
 
     code = f"{secrets.randbelow(900000) + 100000}"
     expire_time = datetime.now(timezone.utc) + timedelta(minutes=5)

@@ -1,0 +1,53 @@
+# ==============================================================================
+# PARKWISE BACKEND PRODUCTION DOCKERFILE
+# Multi-stage, non-root user, slim hardened runtime
+# ==============================================================================
+
+# Stage 1: Build & wheels generation
+FROM python:3.11-slim as builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Stage 2: Hardened Runtime
+FROM python:3.11-slim as runner
+
+WORKDIR /app
+
+# Install runtime PostgreSQL client library and curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create dedicated non-root application user
+RUN groupadd -g 10001 parkwise && \
+    useradd -u 10001 -g parkwise -s /bin/bash -m parkwise
+
+# Copy installed python dependencies from builder
+COPY --from=builder /root/.local /home/parkwise/.local
+ENV PATH=/home/parkwise/.local/bin:$PATH
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Copy application source code
+COPY --chown=parkwise:parkwise . /app
+
+USER parkwise
+
+EXPOSE 8000
+
+# Docker healthcheck using internal liveness probe
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/health/live || exit 1
+
+# Production ASGI server with 4 worker processes and proxy header forwarding
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--proxy-headers", "--forwarded-allow-ips=*"]

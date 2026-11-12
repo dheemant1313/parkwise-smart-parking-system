@@ -1,0 +1,181 @@
+# ==============================================================================
+# PARKWISE PRODUCTION DOCKER COMPOSE ORCHESTRATION
+# Enterprise Multi-Container Architecture with Security, Persistence & Backups
+# ==============================================================================
+
+version: "3.9"
+
+services:
+  # 1. Primary PostgreSQL 16 Relational Store
+  postgres:
+    image: postgres:16-alpine
+    container_name: parkwise-prod-postgres
+    restart: always
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-parkwise_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password required}
+      POSTGRES_DB: ${POSTGRES_DB:-parkwise_production}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    networks:
+      - parkwise_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-parkwise_admin} -d ${POSTGRES_DB:-parkwise_production}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+
+  # 2. Redis 7 High-Throughput In-Memory Lock & Cache Engine
+  redis:
+    image: redis:7-alpine
+    container_name: parkwise-prod-redis
+    restart: always
+    command: >
+      redis-server 
+      --appendonly yes 
+      --maxmemory 512mb 
+      --maxmemory-policy allkeys-lru 
+      --requirepass ${REDIS_PASSWORD:-parkwise_redis_secret}
+    volumes:
+      - redis_prod_data:/data
+    networks:
+      - parkwise_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-parkwise_redis_secret}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+
+  # 3. Parkwise FastAPI Asynchronous Backend Service (4 ASGI Workers)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: parkwise-prod-backend
+    restart: always
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-parkwise_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-parkwise_production}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-parkwise_redis_secret}@redis:6379/0
+      ENVIRONMENT: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - parkwise_internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+
+  # 4. Next.js 14 Production Web Application (SSR / App Router)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: parkwise-prod-frontend
+    restart: always
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: https://parkwise.in/api/v1
+      NEXT_PUBLIC_WS_URL: wss://parkwise.in/ws/telemetry
+      NEXT_PUBLIC_BACKEND_INTERNAL_URL: http://backend:8000/api/v1
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - parkwise_internal
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+
+  # 5. Production Nginx TLS Reverse Proxy & SSL Terminator
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: parkwise-prod-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - parkwise_internal
+      - parkwise_public
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # 6. Automated Scheduled PostgreSQL Daily Backup Runner
+  db_backup:
+    image: postgres:16-alpine
+    container_name: parkwise-prod-db-backup
+    restart: always
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-parkwise_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-parkwise_production}
+      RETENTION_DAYS: 30
+      BACKUP_DIR: /backups
+    volumes:
+      - ./backups:/backups
+      - ./backend/scripts/backup_postgres.sh:/backup.sh:ro
+    networks:
+      - parkwise_internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: |
+      sh -c '
+        chmod +x /backup.sh
+        echo "0 2 * * * /backup.sh >> /var/log/backup.log 2>&1" > /var/spool/cron/crontabs/root
+        crond -f -L 8
+      '
+
+volumes:
+  postgres_prod_data:
+  redis_prod_data:
+  certbot_conf:
+  certbot_www:
+  nginx_logs:
+
+networks:
+  parkwise_internal:
+    internal: true
+  parkwise_public:
+    driver: bridge
