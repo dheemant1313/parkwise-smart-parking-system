@@ -786,3 +786,365 @@ export interface ModelMonitoringResponse {
     recorded_at: string;
   }[];
 }
+
+// ============================================================================
+// Phase 08: Advanced Parkwise Ecosystem TypeScript Interfaces
+// ============================================================================
+
+export type EVConnectorType = "TYPE2_AC" | "CCS2" | "CHADEMO" | "GB_T";
+export type EVChargingStatus = "RESERVED" | "PLUGGED_IN" | "CHARGING" | "COMPLETED" | "IDLE_OVERSTAY" | "DISCONNECTED";
+
+export interface EVChargingSession {
+  id: number;
+  session_code: string;
+  booking_id?: number | null;
+  slot_id: number;
+  lot_id: number;
+  user_email: string;
+  connector_type: EVConnectorType;
+  power_rating_kw: number;
+  initial_soc_pct: number;
+  target_soc_pct: number;
+  current_soc_pct: number;
+  energy_consumed_kwh: number;
+  energy_tariff_per_kwh_inr: number;
+  charging_fee_inr: number;
+  idle_overstay_fee_inr: number;
+  charging_status: EVChargingStatus;
+  scheduled_start: string;
+  scheduled_end: string;
+  plugged_in_at?: string | null;
+  charging_started_at?: string | null;
+  charging_ended_at?: string | null;
+  created_at: string;
+}
+
+export type SubscriptionPlanType = "COMMUTER_WEEKDAY" | "RESIDENTIAL_NIGHT" | "COMMERCIAL_ALL_ACCESS" | "WEEKEND_EXPLORER";
+
+export interface SubscriptionPlan {
+  plan_type: SubscriptionPlanType;
+  title: string;
+  monthly_fee_inr: number;
+  gst_inr: number;
+  total_fee_inr: number;
+  features: string[];
+}
+
+export interface ParkingSubscription {
+  id: number;
+  subscription_code: string;
+  lot_id: number;
+  user_email: string;
+  plan_type: SubscriptionPlanType;
+  primary_vehicle_plate: string;
+  status: "ACTIVE" | "PAUSED" | "EXPIRED" | "CANCELLED";
+  start_date: string;
+  renewal_date: string;
+  auto_renew: boolean;
+  rfid_card_uid?: string | null;
+  pass_qr_code: string;
+  monthly_fee_inr: number;
+  gst_inr: number;
+  total_fee_inr: number;
+  created_at: string;
+}
+
+export interface CorporateAccount {
+  id: number;
+  company_name: string;
+  corporate_code: string;
+  authorized_domain: string;
+  gst_number?: string | null;
+  billing_contact_email: string;
+  monthly_credit_limit_inr: number;
+  current_month_spend_inr: number;
+  is_postpaid: boolean;
+  allocated_daily_slots: number;
+  is_active: boolean;
+  members_count?: number;
+  created_at: string;
+}
+
+export interface CorporateMember {
+  id: number;
+  corporate_id: number;
+  employee_email: string;
+  employee_name: string;
+  employee_id_tag: string;
+  vehicle_plate: string;
+  monthly_stipend_inr: number;
+  current_month_used_inr: number;
+  is_approved: boolean;
+  created_at: string;
+}
+
+export interface FleetAccount {
+  id: number;
+  fleet_code: string;
+  fleet_name: string;
+  operator_email: string;
+  wallet_balance_inr: number;
+  auto_recharge_threshold_inr: number;
+  auto_recharge_amount_inr: number;
+  is_active: boolean;
+  vehicles_count?: number;
+  created_at: string;
+}
+
+export interface FleetVehicle {
+  id: number;
+  fleet_id: number;
+  plate_number: string;
+  driver_name: string;
+  driver_phone: string;
+  daily_spend_limit_inr: number;
+  today_spent_inr: number;
+  fastag_tag_id?: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface GroupReservation {
+  id: number;
+  group_code: string;
+  title: string;
+  host_email: string;
+  host_phone: string;
+  lot_id: number;
+  start_time: string;
+  end_time: string;
+  target_slots_count: number;
+  payment_mode: "HOST_PAYS_ALL" | "INDIVIDUAL_SPLIT";
+  total_estimated_amount_inr: number;
+  invite_url: string;
+  status: "OPEN" | "LOCKED" | "COMPLETED" | "CANCELLED";
+  guests_count: number;
+  created_at: string;
+}
+
+export interface GroupGuest {
+  id: number;
+  group_id: number;
+  guest_name: string;
+  guest_phone: string;
+  vehicle_plate: string;
+  assigned_slot_number?: string | null;
+  joined_at: string;
+}
+
+export interface ParkingEvent {
+  id: number;
+  event_code: string;
+  event_name: string;
+  venue_name: string;
+  lot_id: number;
+  event_date: string;
+  gates_open_time: string;
+  event_end_time: string;
+  total_allocated_bays: number;
+  booked_bays_count: number;
+  flat_event_fee_inr: number;
+  shuttle_service_included: boolean;
+  traffic_advisory?: string | null;
+  created_at: string;
+}
+
+export interface EventParkingPass {
+  id: number;
+  pass_code: string;
+  event_id: number;
+  user_email: string;
+  vehicle_plate: string;
+  assigned_entry_gate: string;
+  fee_paid_inr: number;
+  shuttle_pass_token: string;
+  is_scanned: boolean;
+  scanned_at?: string | null;
+  created_at: string;
+}
+
+export interface WhatsAppNotification {
+  id: number;
+  message_sid: string;
+  booking_reference?: string | null;
+  recipient_phone: string;
+  template_name: string;
+  language_code: string;
+  message_body: string;
+  provider: string;
+  delivery_status: string;
+  is_mock_provider: boolean;
+  disclaimer: string;
+  delivered_at?: string | null;
+  created_at: string;
+}
+
+export interface MarketplaceListing {
+  id: number;
+  listing_code: string;
+  host_name: string;
+  host_email: string;
+  host_phone: string;
+  title: string;
+  address: string;
+  city: string;
+  latitude: number;
+  longitude: number;
+  hourly_rate_inr: number;
+  daily_rate_inr: number;
+  is_ev_ready: boolean;
+  status: "ACTIVE" | "PAUSED" | "DELISTED";
+  kyc_verified: boolean;
+  created_at: string;
+}
+
+export interface MarketplaceBooking {
+  id: number;
+  booking_code: string;
+  listing_id: number;
+  renter_name: string;
+  renter_email: string;
+  vehicle_plate: string;
+  start_time: string;
+  end_time: string;
+  gross_amount_inr: number;
+  platform_fee_inr: number;
+  host_payout_inr: number;
+  status: "CONFIRMED" | "CANCELLED" | "COMPLETED";
+  created_at: string;
+}
+
+export interface RegionFacility {
+  id: number;
+  code: string;
+  name: string;
+  city: string;
+  base_rate: number;
+  surge_mult: number;
+  dynamic_enabled: boolean;
+}
+
+export interface OperatorRegionItem {
+  id: number;
+  region_code: string;
+  name: string;
+  city: string;
+  manager: string;
+  facilities_count: number;
+  total_slots: number;
+  occupied_slots: number;
+  occupancy_pct: number;
+  estimated_daily_revenue_inr: number;
+  facilities: RegionFacility[];
+}
+
+export interface MultiLocationOverview {
+  total_regions: number;
+  total_facilities: number;
+  total_network_slots: number;
+  occupied_network_slots: number;
+  network_occupancy_pct: number;
+  total_revenue_inr: number;
+  active_pricing_overrides: number;
+  regions: OperatorRegionItem[];
+}
+
+export interface CameraStream {
+  id: number;
+  camera_code: string;
+  lot_id: number;
+  zone_name: string;
+  stream_url: string;
+  stream_protocol: string;
+  resolution: string;
+  fps: number;
+  status: "ONLINE" | "DEGRADED" | "OFFLINE";
+  privacy_redaction_enabled: boolean;
+  monitored_slots_json?: string | null;
+  last_heartbeat_at?: string | null;
+  created_at: string;
+}
+
+export interface YOLOBox {
+  box_id: string;
+  class_name: "CAR" | "SUV" | "TWO_WHEELER" | "EV_CAR";
+  confidence: number;
+  coordinates: [number, number, number, number];
+  associated_slot_code: string;
+  is_slot_occupied: boolean;
+}
+
+export interface YOLODetectionRun {
+  id: number;
+  camera_id: number;
+  model_version: string;
+  inference_latency_ms: number;
+  detected_vehicles_count: number;
+  occupied_slots_count: number;
+  vacant_slots_count: number;
+  bounding_boxes: YOLOBox[];
+  privacy_audit_status: string;
+  is_synthetic_test: boolean;
+  disclaimer: string;
+  created_at: string;
+}
+
+export interface ANPRScan {
+  id: number;
+  scan_code: string;
+  lot_id: number;
+  gate_lane: string;
+  lane_type: "ENTRY" | "EXIT";
+  captured_plate_raw: string;
+  normalized_plate: string;
+  confidence_score: number;
+  ocr_engine: string;
+  is_hsrp_compliant: boolean;
+  decision: "AUTO_ALLOWED" | "HUMAN_REVIEW_REQUIRED" | "BARRIER_DENIED" | "HUMAN_APPROVED" | "REJECTED";
+  human_verified: boolean;
+  verified_by_staff_email?: string | null;
+  human_review_required: boolean;
+  privacy_plate_hash: string;
+  disclaimer: string;
+  created_at: string;
+}
+
+export interface ANPRHumanReviewItem {
+  id: number;
+  scan_id: number;
+  lot_id: number;
+  captured_plate: string;
+  candidate_matches: string[];
+  confidence_score: number;
+  reason: string;
+  status: "PENDING" | "APPROVED" | "CORRECTED" | "REJECTED";
+  resolved_plate?: string | null;
+  reviewer_email?: string | null;
+  created_at: string;
+}
+
+export type ValetStatus = "ACCEPTED_AT_KIOSK" | "PARKED" | "RETRIEVAL_REQUESTED" | "IN_TRANSIT" | "DELIVERED_TO_CUSTOMER";
+
+export interface ValetTicket {
+  id: number;
+  ticket_code: string;
+  lot_id: number;
+  booking_id?: number | null;
+  customer_name: string;
+  customer_phone: string;
+  vehicle_plate: string;
+  vehicle_model: string;
+  assigned_valet_name: string;
+  key_locker_tag: string;
+  assigned_slot_number?: string | null;
+  valet_fee_inr: number;
+  status: ValetStatus;
+  odometer_reading_km: number;
+  fuel_or_battery_level_pct: number;
+  pre_existing_damage_notes?: string | null;
+  dropoff_time: string;
+  retrieval_requested_at?: string | null;
+  delivery_time?: string | null;
+  created_at: string;
+}
+

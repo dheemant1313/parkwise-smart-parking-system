@@ -188,6 +188,8 @@ from app.services.payment_service import (
     verify_and_capture_payment,
 )
 from app.services.websocket_manager import ws_manager
+import app.models_ecosystem
+from app.router_ecosystem import router as ecosystem_router
 
 
 @asynccontextmanager
@@ -219,6 +221,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(ecosystem_router)
 
 
 def _serialize_user_profile(user: User) -> UserProfileResponse:

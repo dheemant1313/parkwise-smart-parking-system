@@ -24,6 +24,7 @@ const PUBLIC_NAV_LINKS = [
   { href: "/features", label: "Features" },
   { href: "/business", label: "Business Solutions" },
   { href: "/pricing", label: "Pricing" },
+  { href: "/ecosystem", label: "Ecosystem" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
 ];
@@ -31,6 +32,7 @@ const PUBLIC_NAV_LINKS = [
 const CONSOLE_LINKS = [
   { href: "/driver", label: "Driver App", icon: CarFront },
   { href: "/operator", label: "Operator SaaS", icon: Building2 },
+  { href: "/ecosystem", label: "Ecosystem Hub", icon: Cpu },
   { href: "/gate", label: "Gate Terminal", icon: QrCode },
   { href: "/admin", label: "Admin Console", icon: ShieldCheck },
   { href: "/auth", label: "Auth & RBAC", icon: KeyRound },
