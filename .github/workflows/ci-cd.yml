@@ -84,6 +84,11 @@ jobs:
           cd backend
           python -m pytest -v --tb=short tests/test_phase12_operator_map_and_monitoring.py
 
+      - name: Execute Phase 13 AI Location Intelligence & Demand Heatmaps Tests
+        run: |
+          cd backend
+          python -m pytest -v --tb=short tests/test_phase13_ai_location_intelligence.py
+
   # ----------------------------------------------------------------------------
   # 2. Frontend Verification & TypeScript Compilation
   # ----------------------------------------------------------------------------

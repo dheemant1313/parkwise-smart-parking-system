@@ -15,6 +15,7 @@ import {
   Download,
   FileSpreadsheet,
   Filter,
+  Flame,
   IndianRupee,
   Layers,
   LayoutDashboard,
@@ -35,6 +36,7 @@ import { PricingRuleItem, SlotStatus, SlotType } from "@/types";
 import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
 import { AIOperatorConsole } from "@/components/operator/AIOperatorConsole";
 import { LiveOperatorMap } from "@/components/operator/LiveOperatorMap";
+import { AIIntelligenceHeatmapConsole } from "@/components/operator/AIIntelligenceHeatmapConsole";
 
 type OperatorSection =
   | "OVERVIEW"
@@ -44,7 +46,8 @@ type OperatorSection =
   | "PRICING_AND_HOURS"
   | "RESERVATIONS_DESK"
   | "STAFF_AND_REPORTS"
-  | "AI_INTELLIGENCE_OPS";
+  | "AI_INTELLIGENCE_OPS"
+  | "AI_DEMAND_HEATMAPS";
 
 const STATUS_CYCLE: SlotStatus[] = [
   "AVAILABLE",
@@ -668,6 +671,12 @@ export default function OperatorDashboardPage() {
       label: "AI Intelligence & Ops",
       badge: "6 Modules",
       icon: Brain,
+    },
+    {
+      id: "AI_DEMAND_HEATMAPS",
+      label: "AI Location Intelligence & Heatmaps",
+      badge: "Phase 13",
+      icon: Flame,
     },
   ];
 
@@ -2686,6 +2695,15 @@ export default function OperatorDashboardPage() {
                 activeLot={activeLot}
                 onLotChange={(lotId) => setSelectedScope(lotId)}
               />
+            )}
+
+            {/* ============================================================= */}
+            {/* SECTION 8: AI LOCATION INTELLIGENCE & HEATMAPS (PHASE 13)     */}
+            {/* ============================================================= */}
+            {activeSection === "AI_DEMAND_HEATMAPS" && (
+              <div className="space-y-6">
+                <AIIntelligenceHeatmapConsole />
+              </div>
             )}
           </main>
         </div>

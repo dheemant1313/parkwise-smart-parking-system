@@ -10,6 +10,7 @@ import { LocationSearchBar } from "@/components/map/LocationSearchBar";
 import { MapFilterBar } from "@/components/map/MapFilterBar";
 import { FacilityListView } from "@/components/map/FacilityListView";
 import { FacilityDirectBookingModal } from "@/components/map/FacilityDirectBookingModal";
+import { AIRecommendationDrawer } from "@/components/map/AIRecommendationDrawer";
 import {
   FacilityEntrance,
   NearbyFacilityItem,
@@ -63,6 +64,9 @@ export default function DriverMapPage() {
 
   // Phase 11: Direct Booking Modal State
   const [bookingFacility, setBookingFacility] = useState<ParkingFacilitySummary | null>(null);
+
+  // Phase 13: AI Intelligent Recommendations Drawer State
+  const [aiRecOpen, setAiRecOpen] = useState<boolean>(false);
 
   // Request browser geolocation permission
   const handleRequestGps = useCallback(() => {
@@ -235,6 +239,16 @@ export default function DriverMapPage() {
                 gpsStatus={gpsStatus}
                 gpsError={gpsError}
               />
+              <button
+                type="button"
+                onClick={() => setAiRecOpen(true)}
+                className="shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-semibold text-xs shadow-lg shadow-cyan-950/40 border border-cyan-400/30 transition transform active:scale-95 cursor-pointer"
+                title="Open AI Multi-Objective Parking Recommendations"
+              >
+                <Sparkles className="h-4 w-4 text-cyan-200 animate-pulse" />
+                <span className="hidden sm:inline">AI Smart Match</span>
+                <span className="sm:hidden">AI Match</span>
+              </button>
               <div className="overflow-x-auto">
                 <MapFilterBar
                   radiusKm={radiusKm}
@@ -323,6 +337,23 @@ export default function DriverMapPage() {
               onStartNavigation={(fac, ent) => handleStartNavigation(fac, ent)}
             />
           )}
+
+          {/* Phase 13: AI Intelligent Recommendation Drawer */}
+          <AIRecommendationDrawer
+            isOpen={aiRecOpen}
+            onClose={() => setAiRecOpen(false)}
+            driverLocation={driverLocation}
+            vehicleType={selectedVehicleType}
+            hasEv={hasEv}
+            hasAccessible={hasAccessible}
+            hasCovered={hasCovered}
+            onSelectFacility={(fac) => {
+              setSelectedFacility(fac);
+              setViewMode("map");
+            }}
+            onNavigateFacility={(fac) => handleStartNavigation(fac)}
+            onBookFacility={(fac) => handleOpenDirectBooking(fac)}
+          />
         </div>
       </main>
     </ProtectedRouteGate>

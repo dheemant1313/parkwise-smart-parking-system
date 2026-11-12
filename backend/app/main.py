@@ -199,6 +199,9 @@ from app.seed_facility import seed_phase10_facilities
 import app.models_operator_monitoring
 from app.router_operator_monitoring import router as operator_monitoring_router
 from app.services.operator_monitoring_service import seed_monitoring_alerts_if_needed
+import app.models_location_intelligence
+from app.router_location_intelligence import router as location_intelligence_router
+from app.services.location_intelligence_service import seed_location_intelligence_data
 from app.privacy import (
     get_dpdp_compliance_summary,
     mask_email,
@@ -215,6 +218,7 @@ async def lifespan(app: FastAPI):
         seed_initial_data(db)
         seed_phase10_facilities(db)
         seed_monitoring_alerts_if_needed(db)
+        seed_location_intelligence_data(db)
     finally:
         db.close()
     yield
@@ -242,6 +246,7 @@ app.include_router(ecosystem_router)
 app.include_router(facility_router, prefix="/api/v1/parking")
 app.include_router(facility_router, prefix="/api/parking")
 app.include_router(operator_monitoring_router, prefix="/api/v1")
+app.include_router(location_intelligence_router, prefix="/api/v1")
 
 
 @app.middleware("http")
