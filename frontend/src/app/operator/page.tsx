@@ -39,6 +39,7 @@ import { AIOperatorConsole } from "@/components/operator/AIOperatorConsole";
 import { LiveOperatorMap } from "@/components/operator/LiveOperatorMap";
 import { AIIntelligenceHeatmapConsole } from "@/components/operator/AIIntelligenceHeatmapConsole";
 import { FinancialReconciliationConsole } from "@/components/operator/FinancialReconciliationConsole";
+import { FlexibleParkingHub } from "@/components/operator/FlexibleParkingHub";
 
 type OperatorSection =
   | "OVERVIEW"
@@ -50,7 +51,8 @@ type OperatorSection =
   | "STAFF_AND_REPORTS"
   | "AI_INTELLIGENCE_OPS"
   | "AI_DEMAND_HEATMAPS"
-  | "RECONCILIATION";
+  | "RECONCILIATION"
+  | "FLEXIBLE_PARKING";
 
 const STATUS_CYCLE: SlotStatus[] = [
   "AVAILABLE",
@@ -686,6 +688,12 @@ export default function OperatorDashboardPage() {
       label: "Exit Settlement & Reconciliation",
       badge: "Phase 17",
       icon: Receipt,
+    },
+    {
+      id: "FLEXIBLE_PARKING",
+      label: "Flexible Parking & Accessibility",
+      badge: "Phase 18",
+      icon: Zap,
     },
   ];
 
@@ -2721,6 +2729,15 @@ export default function OperatorDashboardPage() {
             {activeSection === "RECONCILIATION" && (
               <div className="space-y-6 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
                 <FinancialReconciliationConsole />
+              </div>
+            )}
+
+            {/* ============================================================= */}
+            {/* SECTION 10: FLEXIBLE PARKING & ACCESSIBILITY (PHASE 18)       */}
+            {/* ============================================================= */}
+            {activeSection === "FLEXIBLE_PARKING" && (
+              <div className="space-y-6 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
+                <FlexibleParkingHub />
               </div>
             )}
           </main>

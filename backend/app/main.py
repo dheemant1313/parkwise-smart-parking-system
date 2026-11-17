@@ -213,6 +213,9 @@ from app.router_gate_automation import gate_router
 from app.services.gate_access_service import seed_phase16_gate_controllers
 import app.models_reconciliation
 from app.router_reconciliation import reconciliation_router
+import app.models_phase18
+from app.router_flexible_parking import flexible_router
+from app.services.flexible_parking_service import seed_phase18_flexible_data
 from app.privacy import (
     get_dpdp_compliance_summary,
     mask_email,
@@ -233,6 +236,7 @@ async def lifespan(app: FastAPI):
         seed_multilevel_indoor_garage(db)
         seed_phase15_iot_sensors(db)
         seed_phase16_gate_controllers(db)
+        seed_phase18_flexible_data(db)
     finally:
         db.close()
     yield
@@ -267,6 +271,8 @@ app.include_router(gate_router, prefix="/api/v1")
 app.include_router(gate_router, prefix="/api")
 app.include_router(reconciliation_router, prefix="/api/v1/reconciliation")
 app.include_router(reconciliation_router, prefix="/api/reconciliation")
+app.include_router(flexible_router, prefix="/api/v1/flexible")
+app.include_router(flexible_router, prefix="/api/flexible")
 
 
 @app.middleware("http")
