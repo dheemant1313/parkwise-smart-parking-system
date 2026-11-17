@@ -216,6 +216,9 @@ from app.router_reconciliation import reconciliation_router
 import app.models_phase18
 from app.router_flexible_parking import flexible_router
 from app.services.flexible_parking_service import seed_phase18_flexible_data
+import app.models_phase19
+from app.router_driver_ecosystem import driver_ecosystem_router
+from app.services.driver_ecosystem_service import seed_phase19_ecosystem_data
 from app.privacy import (
     get_dpdp_compliance_summary,
     mask_email,
@@ -237,6 +240,7 @@ async def lifespan(app: FastAPI):
         seed_phase15_iot_sensors(db)
         seed_phase16_gate_controllers(db)
         seed_phase18_flexible_data(db)
+        seed_phase19_ecosystem_data(db)
     finally:
         db.close()
     yield
@@ -273,6 +277,8 @@ app.include_router(reconciliation_router, prefix="/api/v1/reconciliation")
 app.include_router(reconciliation_router, prefix="/api/reconciliation")
 app.include_router(flexible_router, prefix="/api/v1/flexible")
 app.include_router(flexible_router, prefix="/api/flexible")
+app.include_router(driver_ecosystem_router, prefix="/api/v1/driver-ecosystem")
+app.include_router(driver_ecosystem_router, prefix="/api/driver-ecosystem")
 
 
 @app.middleware("http")

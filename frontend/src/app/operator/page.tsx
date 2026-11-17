@@ -31,6 +31,7 @@ import {
   Users,
   Zap,
   Receipt,
+  Compass,
 } from "lucide-react";
 import { useParkwise } from "@/lib/store";
 import { PricingRuleItem, SlotStatus, SlotType } from "@/types";
@@ -40,6 +41,7 @@ import { LiveOperatorMap } from "@/components/operator/LiveOperatorMap";
 import { AIIntelligenceHeatmapConsole } from "@/components/operator/AIIntelligenceHeatmapConsole";
 import { FinancialReconciliationConsole } from "@/components/operator/FinancialReconciliationConsole";
 import { FlexibleParkingHub } from "@/components/operator/FlexibleParkingHub";
+import { DriverEcosystemHub } from "@/components/operator/DriverEcosystemHub";
 
 type OperatorSection =
   | "OVERVIEW"
@@ -52,7 +54,8 @@ type OperatorSection =
   | "AI_INTELLIGENCE_OPS"
   | "AI_DEMAND_HEATMAPS"
   | "RECONCILIATION"
-  | "FLEXIBLE_PARKING";
+  | "FLEXIBLE_PARKING"
+  | "DRIVER_ECOSYSTEM";
 
 const STATUS_CYCLE: SlotStatus[] = [
   "AVAILABLE",
@@ -694,6 +697,12 @@ export default function OperatorDashboardPage() {
       label: "Flexible Parking & Accessibility",
       badge: "Phase 18",
       icon: Zap,
+    },
+    {
+      id: "DRIVER_ECOSYSTEM",
+      label: "Valet, Find My Car & Venues",
+      badge: "Phase 19",
+      icon: Compass,
     },
   ];
 
@@ -2738,6 +2747,15 @@ export default function OperatorDashboardPage() {
             {activeSection === "FLEXIBLE_PARKING" && (
               <div className="space-y-6 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
                 <FlexibleParkingHub />
+              </div>
+            )}
+
+            {/* ============================================================= */}
+            {/* SECTION 11: DRIVER ECOSYSTEM & VALET (PHASE 19)               */}
+            {/* ============================================================= */}
+            {activeSection === "DRIVER_ECOSYSTEM" && (
+              <div className="space-y-6 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
+                <DriverEcosystemHub />
               </div>
             )}
           </main>
