@@ -360,8 +360,13 @@ def check_time_range_availability(
         matching_slots.append(s)
 
     available_bays: List[SlotResponse] = []
+    now_utc = datetime.now(timezone.utc)
+    is_immediate = req_start <= now_utc + timedelta(minutes=30)
     for s in matching_slots:
         if s.status == SlotStatus.MAINTENANCE:
+            conflicting_slot_ids.add(s.id)
+            continue
+        if is_immediate and (s.status == SlotStatus.OCCUPIED or s.sensor_health in ("OFFLINE", "STALE")):
             conflicting_slot_ids.add(s.id)
             continue
         if s.id in conflicting_slot_ids:
@@ -627,6 +632,18 @@ def create_transactional_booking(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Slot {slot.slot_number} is currently under maintenance.",
+            )
+
+        if slot.status == SlotStatus.OCCUPIED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Slot {slot.slot_number} is currently occupied by live sensor telemetry.",
+            )
+
+        if slot.sensor_health in ("OFFLINE", "STALE"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Slot {slot.slot_number} is currently unavailable due to sensor hardware fault / unknown occupancy status.",
             )
 
         req_start = _to_utc(payload.start_time)

@@ -269,6 +269,12 @@ export default function IndoorNavigationConsole({
                 (Level B2 • Zone C)
               </span>
             </div>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live Sensor: VACANT • Ultrasonic 98%
+              </span>
+            </div>
           </div>
         </div>
       </div>

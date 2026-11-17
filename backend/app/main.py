@@ -205,6 +205,9 @@ from app.services.location_intelligence_service import seed_location_intelligenc
 import app.models_indoor_navigation
 from app.router_indoor_navigation import indoor_router
 from app.services.indoor_navigation_service import seed_multilevel_indoor_garage
+import app.models_occupancy
+from app.router_occupancy import router as occupancy_router
+from app.services.occupancy_service import seed_phase15_iot_sensors
 from app.privacy import (
     get_dpdp_compliance_summary,
     mask_email,
@@ -223,6 +226,7 @@ async def lifespan(app: FastAPI):
         seed_monitoring_alerts_if_needed(db)
         seed_location_intelligence_data(db)
         seed_multilevel_indoor_garage(db)
+        seed_phase15_iot_sensors(db)
     finally:
         db.close()
     yield
@@ -252,6 +256,7 @@ app.include_router(facility_router, prefix="/api/parking")
 app.include_router(operator_monitoring_router, prefix="/api/v1")
 app.include_router(location_intelligence_router, prefix="/api/v1")
 app.include_router(indoor_router, prefix="/api/v1")
+app.include_router(occupancy_router, prefix="/api/v1")
 
 
 @app.middleware("http")

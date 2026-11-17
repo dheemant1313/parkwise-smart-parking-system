@@ -14,6 +14,7 @@ import {
   Layers,
   Menu,
   QrCode,
+  Radio,
   ShieldCheck,
   Sparkles,
   X,
@@ -53,6 +54,14 @@ const ALL_PLATFORM_APPS = [
     desc: "Manage facilities, revenue & dynamic surge",
     icon: Building2,
     color: "text-indigo-600 bg-indigo-50",
+    roles: ["OPERATOR", "ADMIN"],
+  },
+  {
+    href: "/operator/occupancy",
+    name: "Live Sensor & CV Occupancy",
+    desc: "Real-time ultrasonic & camera bay availability",
+    icon: Radio,
+    color: "text-emerald-600 bg-emerald-50",
     roles: ["OPERATOR", "ADMIN"],
   },
   {
