@@ -251,7 +251,10 @@ export default function LiveOccupancyConsole({ facilityId = 1 }: { facilityId?: 
     }
   };
 
-  const filteredSlots = data?.slots.filter((s) => s.floor === selectedFloor) || [];
+  const filteredSlots =
+    data?.slots.filter(
+      (s) => s.floor === selectedFloor || Math.abs(s.floor) === selectedFloor || (selectedFloor === 2 && s.zone === "C")
+    ) || [];
 
   return (
     <div className="min-h-screen bg-[#070D18] text-slate-100 p-4 md:p-8 font-sans">

@@ -945,6 +945,11 @@ def seed_phase15_iot_sensors(db: Session) -> None:
                     sensor_health="ONLINE",
                 )
             )
+        else:
+            if existing_slot.floor != fl:
+                existing_slot.floor = fl
+            if existing_slot.zone != zn:
+                existing_slot.zone = zn
     db.commit()
 
     # 1. Ultrasonic bay sensors
