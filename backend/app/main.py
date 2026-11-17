@@ -211,6 +211,8 @@ from app.services.occupancy_service import seed_phase15_iot_sensors
 import app.models_gate_automation
 from app.router_gate_automation import gate_router
 from app.services.gate_access_service import seed_phase16_gate_controllers
+import app.models_reconciliation
+from app.router_reconciliation import reconciliation_router
 from app.privacy import (
     get_dpdp_compliance_summary,
     mask_email,
@@ -263,6 +265,8 @@ app.include_router(indoor_router, prefix="/api/v1")
 app.include_router(occupancy_router, prefix="/api/v1")
 app.include_router(gate_router, prefix="/api/v1")
 app.include_router(gate_router, prefix="/api")
+app.include_router(reconciliation_router, prefix="/api/v1/reconciliation")
+app.include_router(reconciliation_router, prefix="/api/reconciliation")
 
 
 @app.middleware("http")

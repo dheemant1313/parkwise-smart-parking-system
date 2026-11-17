@@ -30,6 +30,7 @@ import {
   UserCheck,
   Users,
   Zap,
+  Receipt,
 } from "lucide-react";
 import { useParkwise } from "@/lib/store";
 import { PricingRuleItem, SlotStatus, SlotType } from "@/types";
@@ -37,6 +38,7 @@ import { ProtectedRouteGate } from "@/components/auth/ProtectedRouteGate";
 import { AIOperatorConsole } from "@/components/operator/AIOperatorConsole";
 import { LiveOperatorMap } from "@/components/operator/LiveOperatorMap";
 import { AIIntelligenceHeatmapConsole } from "@/components/operator/AIIntelligenceHeatmapConsole";
+import { FinancialReconciliationConsole } from "@/components/operator/FinancialReconciliationConsole";
 
 type OperatorSection =
   | "OVERVIEW"
@@ -47,7 +49,8 @@ type OperatorSection =
   | "RESERVATIONS_DESK"
   | "STAFF_AND_REPORTS"
   | "AI_INTELLIGENCE_OPS"
-  | "AI_DEMAND_HEATMAPS";
+  | "AI_DEMAND_HEATMAPS"
+  | "RECONCILIATION";
 
 const STATUS_CYCLE: SlotStatus[] = [
   "AVAILABLE",
@@ -677,6 +680,12 @@ export default function OperatorDashboardPage() {
       label: "AI Location Intelligence & Heatmaps",
       badge: "Phase 13",
       icon: Flame,
+    },
+    {
+      id: "RECONCILIATION",
+      label: "Exit Settlement & Reconciliation",
+      badge: "Phase 17",
+      icon: Receipt,
     },
   ];
 
@@ -2703,6 +2712,15 @@ export default function OperatorDashboardPage() {
             {activeSection === "AI_DEMAND_HEATMAPS" && (
               <div className="space-y-6">
                 <AIIntelligenceHeatmapConsole />
+              </div>
+            )}
+
+            {/* ============================================================= */}
+            {/* SECTION 9: FINANCIAL RECONCILIATION & AUTOMATED EXIT (PHASE 17) */}
+            {/* ============================================================= */}
+            {activeSection === "RECONCILIATION" && (
+              <div className="space-y-6 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
+                <FinancialReconciliationConsole />
               </div>
             )}
           </main>
