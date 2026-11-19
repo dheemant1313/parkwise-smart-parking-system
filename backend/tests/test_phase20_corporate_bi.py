@@ -99,6 +99,12 @@ def client(db_session):
 
 def test_corporate_account_creation_and_quota_enforcement(db_session):
     """Verifies that an enterprise account is created and quota limits prevent over-enrollment."""
+    existing = db_session.query(CorporateAccount).filter(CorporateAccount.company_name == "Wipro Digital Mobility").first()
+    if existing:
+        db_session.query(CorporateEmployee).filter(CorporateEmployee.corporate_id == existing.id).delete()
+        db_session.delete(existing)
+        db_session.commit()
+
     acc_data = CorporateAccountCreate(
         company_name="Wipro Digital Mobility",
         gstin="29AAACW1234D1Z2",
@@ -208,6 +214,12 @@ def test_corporate_employee_policy_and_status_update(db_session):
 def test_corporate_invoice_generation_and_payment(db_session):
     """Verifies itemized invoice calculation, 18% GST tax computation, and settlement."""
     corp = db_session.query(CorporateAccount).filter(CorporateAccount.company_name == "Infosys Technologies Ltd").first()
+    db_session.query(CorporateInvoice).filter(
+        CorporateInvoice.corporate_id == corp.id,
+        CorporateInvoice.billing_period == "December 2026"
+    ).delete()
+    db_session.commit()
+
     invoice = corporate_bi_service.generate_corporate_invoice(db_session, corp.id, "December 2026")
 
     assert invoice.id is not None
@@ -300,6 +312,21 @@ def test_multi_facility_bi_analytics_aggregation(db_session):
 
 def test_ai_business_insights_operator_approval_guardrail(db_session):
     """Strictly enforces operator approval guardrail: consequential changes cannot execute without human sign-off."""
+    # Ensure pending insights exist for testing
+    pricing_ins = db_session.query(AIBusinessInsight).filter(AIBusinessInsight.category == InsightCategory.PRICING_OPTIMIZATION).first()
+    if pricing_ins:
+        pricing_ins.approval_status = InsightApprovalStatus.PENDING_APPROVAL
+        pricing_ins.decided_by = None
+        pricing_ins.decided_at = None
+        db_session.commit()
+
+    cap_ins = db_session.query(AIBusinessInsight).filter(AIBusinessInsight.category == InsightCategory.CAPACITY_REALLOCATION).first()
+    if cap_ins:
+        cap_ins.approval_status = InsightApprovalStatus.PENDING_APPROVAL
+        cap_ins.decided_by = None
+        cap_ins.decided_at = None
+        db_session.commit()
+
     insights = corporate_bi_service.list_ai_business_insights(db_session)
     assert len(insights) >= 2
 

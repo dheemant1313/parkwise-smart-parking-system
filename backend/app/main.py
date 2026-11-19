@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import secrets
 import time
 from typing import List, Optional
+import uuid
 from fastapi import (
     Depends,
     FastAPI,
@@ -16,8 +17,10 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import jwt
 from sqlalchemy.orm import Session
 
@@ -284,18 +287,54 @@ app.include_router(flexible_router, prefix="/api/flexible")
 app.include_router(driver_ecosystem_router, prefix="/api/v1/driver-ecosystem")
 app.include_router(driver_ecosystem_router, prefix="/api/driver-ecosystem")
 app.include_router(corporate_bi_router)
+from app.router_production_launch import launch_router
+app.include_router(launch_router)
 
 
 @app.middleware("http")
 async def add_process_time_and_security_headers(request: Request, call_next):
     start_time = time.monotonic()
+    correlation_id = request.headers.get("X-Correlation-ID") or f"pw-{uuid.uuid4().hex[:12]}"
+    request.state.correlation_id = correlation_id
     response = await call_next(request)
     process_time_ms = round((time.monotonic() - start_time) * 1000, 2)
+    response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Process-Time"] = f"{process_time_ms}ms"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("X-Correlation-ID") or f"pw-{uuid.uuid4().hex[:12]}"
+    status_titles = {
+        400: "Bad Request",
+        401: "Unauthorized",
+        403: "Forbidden",
+        404: "Not Found",
+        405: "Method Not Allowed",
+        409: "Conflict",
+        422: "Unprocessable Entity",
+        429: "Too Many Requests",
+        500: "Internal Server Error",
+    }
+    title = status_titles.get(exc.status_code, "HTTP Error")
+    payload = {
+        "detail": exc.detail,
+        "type": f"urn:parkwise:error:{exc.status_code}",
+        "title": title,
+        "status": exc.status_code,
+        "instance": request.url.path,
+        "correlation_id": correlation_id,
+    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=payload,
+        headers={"X-Correlation-ID": correlation_id},
+    )
 
 
 def _serialize_user_profile(user: User) -> UserProfileResponse:

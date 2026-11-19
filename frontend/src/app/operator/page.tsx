@@ -32,6 +32,7 @@ import {
   Zap,
   Receipt,
   Compass,
+  ShieldCheck,
 } from "lucide-react";
 import { useParkwise } from "@/lib/store";
 import { PricingRuleItem, SlotStatus, SlotType } from "@/types";
@@ -43,6 +44,7 @@ import { FinancialReconciliationConsole } from "@/components/operator/FinancialR
 import { FlexibleParkingHub } from "@/components/operator/FlexibleParkingHub";
 import { DriverEcosystemHub } from "@/components/operator/DriverEcosystemHub";
 import EnterpriseBiHub from "@/components/operator/EnterpriseBiHub";
+import ProductionLaunchHub from "@/components/operator/ProductionLaunchHub";
 
 type OperatorSection =
   | "OVERVIEW"
@@ -57,7 +59,8 @@ type OperatorSection =
   | "RECONCILIATION"
   | "FLEXIBLE_PARKING"
   | "DRIVER_ECOSYSTEM"
-  | "ENTERPRISE_BI";
+  | "ENTERPRISE_BI"
+  | "LAUNCH_QA";
 
 const STATUS_CYCLE: SlotStatus[] = [
   "AVAILABLE",
@@ -711,6 +714,12 @@ export default function OperatorDashboardPage() {
       label: "Corporate, Subscriptions & Multi-City BI",
       badge: "Phase 20",
       icon: Building2,
+    },
+    {
+      id: "LAUNCH_QA",
+      label: "Production Launch & QA Scorecard",
+      badge: "Phase 21",
+      icon: ShieldCheck,
     },
   ];
 
@@ -2773,6 +2782,15 @@ export default function OperatorDashboardPage() {
             {activeSection === "ENTERPRISE_BI" && (
               <div className="space-y-6 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
                 <EnterpriseBiHub />
+              </div>
+            )}
+
+            {/* ============================================================= */}
+            {/* SECTION 13: PRODUCTION LAUNCH & QA SCORECARD (PHASE 21)        */}
+            {/* ============================================================= */}
+            {activeSection === "LAUNCH_QA" && (
+              <div className="space-y-6 rounded-3xl overflow-hidden border border-cyan-500/20 shadow-xl">
+                <ProductionLaunchHub />
               </div>
             )}
           </main>

@@ -1,0 +1,26 @@
+{
+  "reconciliation_run_at": "2026-11-19T14:19:16.912753+00:00",
+  "status": "VARIANCES_DETECTED",
+  "total_bookings_audited": 21,
+  "total_transactions_audited": 15,
+  "financial_summary": {
+    "captured_count": 14,
+    "captured_total_inr": 2256.75,
+    "refunded_count": 1,
+    "refunded_total_inr": 236.0,
+    "failed_count": 0,
+    "net_settled_inr": 2020.75
+  },
+  "gate_compliance": {
+    "unpaid_exit_attempts": 0
+  },
+  "variances": [
+    {
+      "booking_id": 6,
+      "code": "BKG-INDOOR-001",
+      "amount_inr": 188.8,
+      "reason": "COMPLETED_WITHOUT_CAPTURED_TRANSACTION"
+    }
+  ],
+  "variances_count": 1
+}

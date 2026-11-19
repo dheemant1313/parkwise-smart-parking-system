@@ -232,8 +232,9 @@ def generate_corporate_invoice(db: Session, corporate_id: int, billing_period: s
     if not acc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Corporate account not found.")
 
-    # Unique invoice code
-    invoice_number = f"INV-CORP-{datetime.now(timezone.utc).strftime('%Y%m')}-{corporate_id:04d}"
+    # Unique invoice code for specific billing period
+    period_code = billing_period.replace(" ", "").upper()
+    invoice_number = f"INV-CORP-{period_code}-{corporate_id:04d}"
     existing = db.query(CorporateInvoice).filter(CorporateInvoice.invoice_number == invoice_number).first()
     if existing:
         return existing
