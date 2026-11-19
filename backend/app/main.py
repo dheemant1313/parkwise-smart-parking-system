@@ -219,6 +219,9 @@ from app.services.flexible_parking_service import seed_phase18_flexible_data
 import app.models_phase19
 from app.router_driver_ecosystem import driver_ecosystem_router
 from app.services.driver_ecosystem_service import seed_phase19_ecosystem_data
+import app.models_phase20
+from app.router_corporate_bi import corporate_bi_router
+from app.services.corporate_bi_service import seed_phase20_corporate_bi_data
 from app.privacy import (
     get_dpdp_compliance_summary,
     mask_email,
@@ -241,6 +244,7 @@ async def lifespan(app: FastAPI):
         seed_phase16_gate_controllers(db)
         seed_phase18_flexible_data(db)
         seed_phase19_ecosystem_data(db)
+        seed_phase20_corporate_bi_data(db)
     finally:
         db.close()
     yield
@@ -279,6 +283,7 @@ app.include_router(flexible_router, prefix="/api/v1/flexible")
 app.include_router(flexible_router, prefix="/api/flexible")
 app.include_router(driver_ecosystem_router, prefix="/api/v1/driver-ecosystem")
 app.include_router(driver_ecosystem_router, prefix="/api/driver-ecosystem")
+app.include_router(corporate_bi_router)
 
 
 @app.middleware("http")

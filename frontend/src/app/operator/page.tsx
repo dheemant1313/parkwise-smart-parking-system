@@ -42,6 +42,7 @@ import { AIIntelligenceHeatmapConsole } from "@/components/operator/AIIntelligen
 import { FinancialReconciliationConsole } from "@/components/operator/FinancialReconciliationConsole";
 import { FlexibleParkingHub } from "@/components/operator/FlexibleParkingHub";
 import { DriverEcosystemHub } from "@/components/operator/DriverEcosystemHub";
+import EnterpriseBiHub from "@/components/operator/EnterpriseBiHub";
 
 type OperatorSection =
   | "OVERVIEW"
@@ -55,7 +56,8 @@ type OperatorSection =
   | "AI_DEMAND_HEATMAPS"
   | "RECONCILIATION"
   | "FLEXIBLE_PARKING"
-  | "DRIVER_ECOSYSTEM";
+  | "DRIVER_ECOSYSTEM"
+  | "ENTERPRISE_BI";
 
 const STATUS_CYCLE: SlotStatus[] = [
   "AVAILABLE",
@@ -703,6 +705,12 @@ export default function OperatorDashboardPage() {
       label: "Valet, Find My Car & Venues",
       badge: "Phase 19",
       icon: Compass,
+    },
+    {
+      id: "ENTERPRISE_BI",
+      label: "Corporate, Subscriptions & Multi-City BI",
+      badge: "Phase 20",
+      icon: Building2,
     },
   ];
 
@@ -2756,6 +2764,15 @@ export default function OperatorDashboardPage() {
             {activeSection === "DRIVER_ECOSYSTEM" && (
               <div className="space-y-6 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
                 <DriverEcosystemHub />
+              </div>
+            )}
+
+            {/* ============================================================= */}
+            {/* SECTION 12: CORPORATE, SUBSCRIPTIONS & BI (PHASE 20)           */}
+            {/* ============================================================= */}
+            {activeSection === "ENTERPRISE_BI" && (
+              <div className="space-y-6 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
+                <EnterpriseBiHub />
               </div>
             )}
           </main>
